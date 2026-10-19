@@ -316,7 +316,9 @@ const PROVIDERS = deepFreeze({
 const PROVIDER_IDS = deepFreeze(Object.keys(PROVIDERS));
 
 /** Default pabrik bila `X-Provider`/`provider` tidak diberikan (§3.7). */
-const DEFAULT_PROVIDER = 'gemini';
+// Default = OpenRouter: satu key = 500+ model + tier gratis, dan mendukung semua
+// provider lain via routing (ADR-07). Gemini tetap selectable, bukan default.
+const DEFAULT_PROVIDER = 'openrouter';
 
 /** Adapter wire yang dikenal (§2.13 bentuk record). */
 const ADAPTERS = deepFreeze(['gemini', 'anthropic', 'openai-compatible']);

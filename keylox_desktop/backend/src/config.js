@@ -55,6 +55,13 @@ const config = {
   isProduction,
   logLevel: process.env.LOG_LEVEL || 'info',
   geminiApiKey: process.env.GEMINI_API_KEY || '',
+  openrouterApiKey: process.env.OPENROUTER_API_KEY || '',
+  // Key fallback untuk provider default (OpenRouter). Dipakai hanya dev/testing
+  // bila BYOK_REQUIRE_USER_KEY=false & !production.
+  defaultProviderApiKey: process.env.DEFAULT_PROVIDER_API_KEY
+    || process.env.OPENROUTER_API_KEY
+    || process.env.GEMINI_API_KEY
+    || '',
   geminiModel: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
   geminiModelVersion: process.env.GEMINI_MODEL_VERSION || '1',
   jwtSecret: resolveJwtSecret(),

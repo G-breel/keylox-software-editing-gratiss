@@ -345,3 +345,28 @@ agregat milik device itu (`/ai/usage`).
 | Backend | `/ai/usage` diperluas: breakdown per provider/model + estimasi biaya |
 
 **Urutan kerja:** masuk ke rework v1.2 yang sama dengan ADR-03 (arsitek → implement → test).
+
+---
+
+## 14. ADR-07 — Default Provider = OpenRouter (bukan Gemini)
+
+**Status:** Diterima (user: "yg gemini gajadi gw pake ai lain"). **Tanggal:** 2026-10-19.
+
+**Keputusan:** Provider default diubah dari `gemini` → **`openrouter`**.
+
+**Alasan:**
+1. Satu key `sk-or-…` = akses 500+ model (Claude, GPT, Gemini, Llama, DeepSeek, Mistral, …)
+   → langsung memenuhi "semua AI yang bisa ngedit" tanpa hardcode 1 vendor.
+2. Ada tier gratis (`:free`, ~50 req/hari) → onboarding "key gratis" tetap jalan **tanpa login Google**
+   (yang sebelumnya kita tolak karena kuota 250→20 RPD & konten dipakai training).
+3. Format OpenAI-compatible → adapter paling sederhana, sudah didukung.
+4. Gemini tetap **selectable** (user bisa pilih), tapi **bukan default**.
+
+**Perubahan teknis:**
+- `DEFAULT_PROVIDER = 'openrouter'` di `src/shared/providerRegistry.js`, `backend/src/services/providerRegistry.js`.
+- `backend/src/config.js`: tambah `openrouterApiKey` + `defaultProviderApiKey` (fallback: env → `GEMINI_API_KEY` legacy).
+- `backend/.env.example`: tambah `OPENROUTER_API_KEY`.
+- Onboarding "Dapatkan API Key Gratis" → `https://openrouter.ai/keys` (freeTier true).
+
+**Catatan privasi:** OpenRouter = `leavesDevice:true`, `freeTierTraining: ⚠️ (tergantung model upstream)`.
+User yang mau 100% privat tetap bisa pilih **Ollama/LM Studio** (lokal).

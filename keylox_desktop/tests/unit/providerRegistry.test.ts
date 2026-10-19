@@ -194,7 +194,7 @@ describe('provider lokal, baseUrl klien & allowlist docs', () => {
   });
 
   it('getProvider/hasProvider aman untuk input non-string', () => {
-    expect(shared.DEFAULT_PROVIDER).toBe('gemini');
+    expect(shared.DEFAULT_PROVIDER).toBe('openrouter');
     expect(shared.getProvider('gemini')?.id).toBe('gemini');
     expect(shared.getProvider('cohere')).toBeNull();
     expect(shared.getProvider(null)).toBeNull();

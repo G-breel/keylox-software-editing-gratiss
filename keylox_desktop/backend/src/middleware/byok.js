@@ -120,7 +120,7 @@ async function resolveByok(request, reply) {
       logger.warn({ provider: provider.id, rid: request.id }, 'request AI tanpa X-Provider-Key ditolak');
       return fail(reply, noKeyError(request.id), request.id);
     }
-    request.providerKeySource = config.geminiApiKey ? 'env' : 'none';
+    request.providerKeySource = (config.defaultProviderApiKey || config.geminiApiKey) ? 'env' : 'none';
     return undefined;
   }
 

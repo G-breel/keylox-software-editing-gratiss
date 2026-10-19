@@ -143,7 +143,7 @@ const PROVIDERS = Object.freeze({
 
 const PROVIDER_IDS = Object.freeze(Object.keys(PROVIDERS));
 
-const DEFAULT_PROVIDER = 'gemini';
+const DEFAULT_PROVIDER = 'openrouter';
 
 // Host endpoint metadata cloud / nama internal (SSRF → eskalasi kredensial).
 const METADATA_HOSTS = new Set([

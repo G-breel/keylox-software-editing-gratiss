@@ -126,7 +126,7 @@ test('key dengan format salah → 401 ERR_PROVIDER_KEY_INVALID tanpa menggemakan
 
 test('key sah → 200 + EditPlan tervalidasi, key tidak pernah muncul di respons', async () => {
   const { status, json, text } = await request(byokServer, 'POST', '/ai/parse-command', {
-    headers: { 'x-device-id': DEVICE_A, 'x-provider-key': KEY_A },
+    headers: { 'x-device-id': DEVICE_A, 'x-provider': 'gemini', 'x-provider-key': KEY_A },
     body: parseBody('cache-probe-byok-' + Date.now()),
   });
   assert.equal(status, 200);
@@ -143,13 +143,13 @@ test('cache (jobType struktural): input sama + key sama → hit; key berbeda →
   const body = { prompt: 'cache-key-scope-' + Date.now() };
 
   const first = await request(byokServer, 'POST', '/ai/scene-detect', {
-    headers: { 'x-device-id': DEVICE_A, 'x-provider-key': KEY_A }, body,
+    headers: { 'x-device-id': DEVICE_A, 'x-provider': 'gemini', 'x-provider-key': KEY_A }, body,
   });
   const second = await request(byokServer, 'POST', '/ai/scene-detect', {
-    headers: { 'x-device-id': DEVICE_A, 'x-provider-key': KEY_A }, body,
+    headers: { 'x-device-id': DEVICE_A, 'x-provider': 'gemini', 'x-provider-key': KEY_A }, body,
   });
   const otherKey = await request(byokServer, 'POST', '/ai/scene-detect', {
-    headers: { 'x-device-id': DEVICE_A, 'x-provider-key': KEY_B }, body,
+    headers: { 'x-device-id': DEVICE_A, 'x-provider': 'gemini', 'x-provider-key': KEY_B }, body,
   });
 
   assert.equal(first.status, 200, first.text);
@@ -161,7 +161,7 @@ test('cache (jobType struktural): input sama + key sama → hit; key berbeda →
 test('cache: jobType berkonten (parse_command) TIDAK menghasilkan baris cache (§3.5 v1.2)', async () => {
   const body = parseBody('no-cache-content-' + Date.now());
   // Key khusus agar tidak menabrak rate limit per-key (3) di server BYOK.
-  const headers = { 'x-device-id': DEVICE_A, 'x-provider-key': KEY_C };
+  const headers = { 'x-device-id': DEVICE_A, 'x-provider': 'gemini', 'x-provider-key': KEY_C };
 
   const first = await request(byokServer, 'POST', '/ai/parse-command', { headers, body });
   const second = await request(byokServer, 'POST', '/ai/parse-command', { headers, body });
@@ -173,7 +173,7 @@ test('cache: jobType berkonten (parse_command) TIDAK menghasilkan baris cache (�
 });
 
 test('rate limit tambahan per hash(key): ke-4 permintaan dengan key sama → 429 + Retry-After', async () => {
-  const headers = { 'x-device-id': DEVICE_A, 'x-provider-key': KEY_RATE };
+  const headers = { 'x-device-id': DEVICE_A, 'x-provider': 'gemini', 'x-provider-key': KEY_RATE };
   const statuses = [];
   for (let i = 0; i < 3; i++) {
     const r = await request(byokServer, 'POST', '/ai/parse-command', { headers, body: parseBody(`rate-key-${i}`) });
@@ -262,7 +262,7 @@ test('anti-SSRF (production, tanpa pengecualian dev): loopback & link-local teta
 
 test('baseUrl pada allowlist diterima (host provider resmi)', async () => {
   const { status, json } = await request(devServer, 'POST', '/ai/parse-command', {
-    headers: { 'x-device-id': DEVICE_A, 'x-provider-base-url': 'https://generativelanguage.googleapis.com' },
+    headers: { 'x-device-id': DEVICE_A, 'x-provider': 'gemini', 'x-provider-base-url': 'https://generativelanguage.googleapis.com' },
     body: parseBody('base url allowlisted ' + Date.now()),
   });
   assert.equal(status, 200);
@@ -282,7 +282,7 @@ test('production: tanpa key → 401 ERR_AI_NO_KEY (fallback env dimatikan total)
 
 test('production: X-Provider-Key tanpa TLS ditolak (TLS-only, §3.7)', async () => {
   const { status, json, text } = await request(prodServer, 'POST', '/ai/parse-command', {
-    headers: { 'x-device-id': DEVICE_A, 'x-provider-key': KEY_A },
+    headers: { 'x-device-id': DEVICE_A, 'x-provider': 'gemini', 'x-provider-key': KEY_A },
     body: parseBody('production insecure transport'),
   });
   assert.equal(status, 400);

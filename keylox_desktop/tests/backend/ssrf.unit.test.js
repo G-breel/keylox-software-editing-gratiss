@@ -141,9 +141,9 @@ test('format key yang tidak sah ditolak tanpa menggemakan nilainya', () => {
   }
 });
 
-test('X-Provider default gemini; provider tak dikenal → ERR_PROVIDER_UNSUPPORTED', () => {
-  assert.equal(registry.resolveProvider(undefined).id, 'gemini');
-  assert.equal(registry.resolveProvider('').id, 'gemini');
+test('X-Provider default openrouter; provider tak dikenal → ERR_PROVIDER_UNSUPPORTED', () => {
+  assert.equal(registry.resolveProvider(undefined).id, 'openrouter');
+  assert.equal(registry.resolveProvider('').id, 'openrouter');
   assert.equal(registry.resolveProvider('GEMINI').id, 'gemini');
   // v1.2: registry backend kini memuat 13 provider (§2.13) — `openai` SUPPORTED.
   assert.equal(registry.resolveProvider('openai').id, 'openai');
