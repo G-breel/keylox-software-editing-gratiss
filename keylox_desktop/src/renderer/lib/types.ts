@@ -46,6 +46,10 @@ export interface Clip {
   trackId: string;
   start: number;
   end: number;
+  /** Titik masuk di media sumber (detik). Default 0. */
+  in?: number;
+  /** Titik keluar di media sumber (detik). Default `in + (end - start)`. */
+  out?: number;
   speed: number;
   volume: number;
   muted: boolean;
@@ -80,6 +84,8 @@ export interface ProjectState {
   selectedClipId: string | null;
   playhead: number;
   isPlaying: boolean;
+  /** Pengaturan export terakhir (disimpan di manifest proyek). */
+  lastExport?: Record<string, unknown> | null;
 }
 
 export const defaultFilters: FilterState = {

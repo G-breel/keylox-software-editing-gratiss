@@ -172,6 +172,71 @@ export interface AiChatReply {
   plan?: EditPlan;
 }
 
+/** §2.1 + M2-A — snapshot proyek untuk `.keylox`. */
+export interface ProjectSnapshotLike {
+  name: string;
+  aspectRatio: string;
+  width: number;
+  height: number;
+  fps: number;
+  tracks: unknown[];
+  media: unknown[];
+  playhead: number;
+  selectedClipId: string | null;
+  lastExport?: Record<string, unknown> | null;
+}
+
+export interface MissingMedia {
+  id: string;
+  name: string;
+  path: string;
+  reason: 'missing' | 'hash_mismatch';
+}
+
+export interface ProjectSaveResult {
+  ok: boolean;
+  canceled?: boolean;
+  filePath?: string;
+  size?: number;
+  savedAt?: string;
+  projectId?: string;
+}
+
+export interface ProjectOpenResult {
+  ok: boolean;
+  canceled?: boolean;
+  filePath?: string;
+  autosave?: boolean;
+  project?: ProjectSnapshotLike;
+  missingMedia?: MissingMedia[];
+  manifestMeta?: {
+    projectId: string | null;
+    appVersion: string | null;
+    formatVersion: number;
+    schemaVersion: number;
+    updatedAt: string;
+    mediaMode: string;
+  };
+}
+
+export interface RecentProject {
+  filePath: string;
+  name: string;
+  savedAt: string | null;
+}
+
+export interface RecentProjectsResult {
+  items: RecentProject[];
+  autosave: {
+    available: boolean;
+    path: string;
+    name?: string;
+    savedAt?: string;
+    clipCount?: number;
+    corrupt?: boolean;
+  } | null;
+}
+
 export interface KeyloxApi {
   dialog: {
     openFiles: () => Promise<string[]>;
@@ -195,6 +260,10 @@ export interface KeyloxApi {
   };
   project: {
     createWithMedia: (spec: { mediaCount: number; fixture?: string }) => Promise<unknown>;
+    save: (input: { project: ProjectSnapshotLike; filePath?: string; saveAs?: boolean; includeMedia?: boolean }) => Promise<ProjectSaveResult>;
+    open: (input?: { filePath?: string; autosave?: boolean }) => Promise<ProjectOpenResult>;
+    recent: () => Promise<RecentProjectsResult>;
+    markDirty: (input: { dirty: boolean; project?: ProjectSnapshotLike; discardAutosave?: boolean }) => Promise<{ ok: boolean; dirty: boolean; autosaveAt: string | null; discarded?: boolean }>;
   };
   settings: {
     get: (input: { key: string }) => Promise<unknown>;
@@ -376,7 +445,13 @@ function namespacedFromLegacy(legacy: Api): KeyloxApi {
         return typeof off === 'function' ? off : () => {};
       },
     },
-    project: { createWithMedia: () => Promise.reject(unavailableSilently()) },
+    project: {
+      createWithMedia: () => Promise.reject(unavailableSilently()),
+      save: () => Promise.reject(unavailableSilently()),
+      open: () => Promise.reject(unavailableSilently()),
+      recent: () => Promise.resolve({ items: [], autosave: null }),
+      markDirty: () => Promise.resolve({ ok: true, dirty: false, autosaveAt: null }),
+    },
     settings: {
       get: () => Promise.resolve(null),
       set: () => Promise.reject(unavailableSilently()),
@@ -409,7 +484,13 @@ export const keylox: KeyloxApi = (() => {
     fs: { readDir: unavailable, stat: unavailable },
     shell: { openPath: unavailable, openExternal: unavailable },
     ffmpeg: { probe: unavailable, export: unavailable, thumbnail: unavailable, onProgress: () => () => {} },
-    project: { createWithMedia: unavailable },
+    project: {
+      createWithMedia: unavailable,
+      save: unavailable,
+      open: unavailable,
+      recent: unavailable,
+      markDirty: unavailable,
+    },
     settings: {
       get: unavailable,
       set: unavailable,

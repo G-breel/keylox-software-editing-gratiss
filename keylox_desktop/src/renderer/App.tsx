@@ -10,13 +10,19 @@ import { ExportDialog } from './components/ExportDialog';
 import { SettingsModal } from './components/SettingsModal';
 import { ToastHost } from './components/ToastHost';
 import { useEditorStore } from './stores/editorStore';
+import { useProjectFiles } from './hooks/useProjectFiles';
 import { api } from './lib/ipc';
+import { uid } from './lib/utils';
+import { splitClipAt, totalDurationSec } from './lib/timeline';
+import { toastInfo } from './lib/toast';
 
 export const App: React.FC = () => {
   const store = useEditorStore();
+  const projects = useProjectFiles();
   const [exportOpen, setExportOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [promptSeed, setPromptSeed] = useState<{ text: string; id: number } | null>(null);
+  const [autosaveDismissed, setAutosaveDismissed] = useState(false);
 
   const openFiles = useCallback(async () => {
     const paths = await api.openFiles();
@@ -47,37 +53,108 @@ export const App: React.FC = () => {
     setSettingsOpen(false);
   }, []);
 
+  const splitSelected = useCallback(() => {
+    const state = useEditorStore.getState();
+    const clip = state.getSelectedClip();
+    if (!clip) {
+      toastInfo('Pilih klip yang akan dipotong.');
+      return;
+    }
+    const at = state.playhead / 1000;
+    if (!splitClipAt(clip, at, 'check')) {
+      toastInfo('Playhead harus berada di dalam klip (bukan di tepi).');
+      return;
+    }
+    state.splitClip(clip.id, at, uid());
+  }, []);
+
+  const duplicateSelected = useCallback(() => {
+    const state = useEditorStore.getState();
+    const clip = state.getSelectedClip();
+    if (clip) state.duplicateClip(clip.id, uid());
+  }, []);
+
+  const requestNewProject = useCallback(() => {
+    if (projects.dirty && !window.confirm('Proyek belum disimpan. Buat proyek baru dan buang perubahan?')) return;
+    projects.newProject();
+  }, [projects]);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
-      const inInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
+      const inInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
       if (e.ctrlKey || e.metaKey) {
-        if (e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); store.undo(); return; }
-        if (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey)) { e.preventDefault(); store.redo(); return; }
-        if (e.key.toLowerCase() === 's') { e.preventDefault(); store.pushHistory(); return; }
-        if (e.key.toLowerCase() === 'p') { e.preventDefault(); const el = document.querySelector('input[placeholder*="Ketik perintah"]') as HTMLInputElement; el?.focus(); return; }
-        if (e.key.toLowerCase() === 'e') { e.preventDefault(); setExportOpen(true); return; }
-        if (e.key.toLowerCase() === 'i') { e.preventDefault(); openFiles(); return; }
-        if (e.shiftKey && e.key.toLowerCase() === 'i') { e.preventDefault(); openFolder(); return; }
+        const key = e.key.toLowerCase();
+        if (key === 's') {
+          e.preventDefault();
+          void projects.save(e.shiftKey);
+          return;
+        }
+        if (key === 'o' && !e.shiftKey) { e.preventDefault(); void projects.open(); return; }
+        if (key === 'n') { e.preventDefault(); requestNewProject(); return; }
+        if (key === 'd') { e.preventDefault(); duplicateSelected(); return; }
+        if (key === 'z' && !e.shiftKey) { e.preventDefault(); store.undo(); return; }
+        if (key === 'y' || (key === 'z' && e.shiftKey)) { e.preventDefault(); store.redo(); return; }
+        if (key === 'p') {
+          e.preventDefault();
+          const el = document.querySelector('input[placeholder*="Ketik perintah"]') as HTMLInputElement | null;
+          el?.focus();
+          return;
+        }
+        if (key === 'e') { e.preventDefault(); setExportOpen(true); return; }
+        if (key === 'i' && !e.shiftKey) { e.preventDefault(); void openFiles(); return; }
+        if (key === 'i' && e.shiftKey) { e.preventDefault(); void openFolder(); return; }
         if (e.key === ',') { e.preventDefault(); setSettingsOpen(true); return; }
+        if (e.key === '+' || e.key === '=') { e.preventDefault(); store.zoomIn(); return; }
+        if (e.key === '-' || e.key === '_') { e.preventDefault(); store.zoomOut(); return; }
+        if (e.key === '0') { e.preventDefault(); useEditorStore.getState().setZoom(40); return; }
       }
       if (inInput) return;
+
       if (e.code === 'Space') { e.preventDefault(); store.setPlaying(!store.isPlaying); return; }
+      if (e.key === 'Home') { e.preventDefault(); store.setPlayhead(0); return; }
+      if (e.key === 'End') {
+        e.preventDefault();
+        store.setPlayhead(totalDurationSec(store.tracks) * 1000);
+        return;
+      }
+      if (e.key.toLowerCase() === 's') { e.preventDefault(); splitSelected(); return; }
+      if (e.key.toLowerCase() === 'm') {
+        e.preventDefault();
+        const state = useEditorStore.getState();
+        const clip = state.getSelectedClip();
+        const track = clip
+          ? state.tracks.find((t) => t.id === clip.trackId)
+          : state.tracks.find((t) => t.type === 'audio');
+        if (track) state.updateTrack(track.id, { muted: !track.muted });
+        return;
+      }
+      if (e.key.toLowerCase() === 'n') { e.preventDefault(); store.toggleSnap(); return; }
+      if (e.key === '+' || e.key === '=') { store.zoomIn(); return; }
+      if (e.key === '-' || e.key === '_') { store.zoomOut(); return; }
       if (e.key.toLowerCase() === 'j') { /* shuttle back placeholder */ return; }
       if (e.key.toLowerCase() === 'k') { store.setPlaying(false); return; }
       if (e.key.toLowerCase() === 'l') { store.setPlaying(true); return; }
-      if (e.key.toLowerCase() === 'i') { /* mark in */ const c = store.getSelectedClip(); if (c) store.updateClip(c.id, { start: store.playhead / 1000 }); return; }
-      if (e.key.toLowerCase() === 'o') { const c = store.getSelectedClip(); if (c) store.updateClip(c.id, { end: store.playhead / 1000 }); return; }
+      if (e.key.toLowerCase() === 'i') {
+        const c = store.getSelectedClip();
+        if (c) store.updateClip(c.id, { start: Math.min(store.playhead / 1000, c.end - 0.1) });
+        return;
+      }
+      if (e.key.toLowerCase() === 'o') {
+        const c = store.getSelectedClip();
+        if (c) store.updateClip(c.id, { end: Math.max(store.playhead / 1000, c.start + 0.1) });
+        return;
+      }
       if (e.key === 'Delete' || e.key === 'Backspace') {
         const c = store.getSelectedClip();
-        if (c) { store.removeClip(c.id); }
+        if (c) store.removeClip(c.id);
         return;
       }
       if (e.key === 'Escape') { store.selectClip(null); setExportOpen(false); setSettingsOpen(false); return; }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [store, openFiles, openFolder]);
+  }, [store, openFiles, openFolder, projects, duplicateSelected, requestNewProject, splitSelected]);
 
   // drag-drop global
   useEffect(() => {
@@ -87,9 +164,60 @@ export const App: React.FC = () => {
     return () => { window.removeEventListener('dragover', prevent); window.removeEventListener('drop', prevent); };
   }, []);
 
+  const autosave = projects.recent.autosave;
+  const showAutosaveBanner = Boolean(autosave?.available && !autosaveDismissed);
+
   return (
     <div className="h-screen flex flex-col bg-app" data-testid="app-ready">
-      <TopBar onOpenFiles={openFiles} onOpenFolder={openFolder} onExport={() => setExportOpen(true)} onSettings={() => setSettingsOpen(true)} />
+      <TopBar
+        onOpenFiles={openFiles}
+        onOpenFolder={openFolder}
+        onExport={() => setExportOpen(true)}
+        onSettings={() => setSettingsOpen(true)}
+        onNewProject={requestNewProject}
+        onOpenProject={() => { void projects.open(); }}
+        onSaveProject={(saveAs) => { void projects.save(saveAs); }}
+        onRelink={() => { void projects.relink(); }}
+        projectName={projects.filePath}
+        dirty={projects.dirty}
+        busy={projects.busy}
+        missingCount={projects.missing.length}
+      />
+      {showAutosaveBanner && (
+        <div className="flex items-center gap-2 border-b border-border bg-elevated px-3 py-1.5 text-xs text-textPrimary">
+          <span className="text-warning">Autosave ditemukan</span>
+          <span className="text-textMuted truncate">
+            {autosave?.corrupt
+              ? 'Berkas autosave rusak.'
+              : `${autosave?.name || 'Proyek'}${autosave?.savedAt ? ` · ${new Date(autosave.savedAt).toLocaleString('id-ID')}` : ''}${typeof autosave?.clipCount === 'number' ? ` · ${autosave.clipCount} klip` : ''}`}
+          </span>
+          <div className="flex-1" />
+          {!autosave?.corrupt && (
+            <button
+              type="button"
+              className="rounded bg-active px-2 py-0.5 text-[11px] font-semibold text-white transition-colors duration-150 ease-out hover:brightness-110"
+              onClick={() => { setAutosaveDismissed(true); void projects.recoverAutosave(); }}
+            >Pulihkan</button>
+          )}
+          <button
+            type="button"
+            className="rounded bg-panel px-2 py-0.5 text-[11px] text-textMuted border border-border transition-colors duration-150 ease-out hover:text-textPrimary"
+            onClick={() => { setAutosaveDismissed(true); void projects.discardAutosave(); }}
+          >Abaikan</button>
+        </div>
+      )}
+      {projects.missing.length > 0 && (
+        <div className="flex items-center gap-2 border-b border-border bg-warning/10 px-3 py-1.5 text-xs text-textPrimary">
+          <span className="text-warning">{projects.missing.length} media hilang/berubah.</span>
+          <span className="text-textMuted">Pilih berkas pengganti agar klip kembali tampil.</span>
+          <div className="flex-1" />
+          <button
+            type="button"
+            className="rounded bg-warning/20 px-2 py-0.5 text-[11px] text-warning border border-warning/40 transition-colors duration-150 ease-out hover:bg-warning/30"
+            onClick={() => { void projects.relink(); }}
+          >Relink media</button>
+        </div>
+      )}
       <div className="flex flex-1 overflow-hidden">
         <MediaPanel />
         <div className="flex-1 flex flex-col overflow-hidden">

@@ -65,6 +65,16 @@ describe('allowlist channel preload (§2.11.2)', () => {
     expect(invokeBlock).not.toContain('eval');
     expect(invokeBlock).not.toContain('shell:openExternalPath');
   });
+
+  it('mengekspos channel proyek .keylox M2-A', () => {
+    const invokeBlock = blockAfter('const INVOKE_CHANNELS = Object.freeze({');
+    for (const channel of ['project:save', 'project:open', 'project:recent', 'project:markDirty']) {
+      expect(invokeBlock, channel).toContain(`'${channel}': true`);
+    }
+    for (const method of ['save:', 'open:', 'recent:', 'markDirty:']) {
+      expect(preloadSource, method).toContain(method);
+    }
+  });
 });
 
 describe('daftar 13 provider inline (sandbox:true)', () => {

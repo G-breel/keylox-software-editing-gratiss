@@ -29,6 +29,7 @@ const { createPrivacyService } = require('./src/main/privacyService');
 const { createUsageService } = require('./src/main/usageService');
 const { createExternalLinks } = require('./src/main/externalLinks');
 const { buildExportPayload, writeExportFile } = require('./src/main/localDataExport');
+const projectFile = require('./src/main/projectFile');
 const { USAGE_RANGES } = require('./src/shared/usage.schema');
 const { DataWipeLocalSchema, DataExportLocalSchema } = require('./src/shared/privacy.schema');
 
@@ -49,6 +50,19 @@ let aiClient = null;
 let privacyService = null;
 let usageService = null;
 let externalLinks = null;
+
+/* ------------------------------------------------------------------ *
+ * Proyek `.keylox` (M2-A) — state autosave & path yang diizinkan ditulis.
+ * Path hanya masuk allowlist setelah dipilih lewat dialog native atau dibuka.
+ * ------------------------------------------------------------------ */
+
+let autosaveSnapshot = null;
+let autosaveDirty = false;
+let autosaveLastAt = null;
+let autosaveTimer = null;
+let currentProjectId = null;
+const allowedProjectPaths = new Set();
+const AUTOSAVE_INTERVAL_MS = 60_000;
 
 function getSecretStore() {
   if (!secretStore) {
@@ -101,6 +115,84 @@ function getAiClient() {
     });
   }
   return aiClient;
+}
+
+/* ------------------------------------------------------------------ *
+ * Proyek: manifest, zip, recent, autosave (M2-A)
+ * ------------------------------------------------------------------ */
+
+function appVersionSafe() {
+  try { return app.getVersion(); } catch { return '1.0.0'; }
+}
+
+function safeProjectName(name) {
+  const base = typeof name === 'string' && name.trim() ? name.trim() : 'proyek';
+  return base.replace(/[^A-Za-z0-9._ -]/g, '_').slice(0, 80) || 'proyek';
+}
+
+function readExistingManifestMeta(filePath) {
+  try {
+    if (!fs.existsSync(filePath)) return null;
+    const parsed = projectFile.readProjectFile(filePath);
+    return {
+      projectId: parsed.manifest.projectId || null,
+      createdAt: parsed.manifest.createdAt || null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function recentEntryFor(filePath, project, savedAt) {
+  return {
+    filePath,
+    name: (project && project.name) || path.basename(filePath),
+    savedAt: savedAt || new Date().toISOString(),
+  };
+}
+
+function rememberRecent(filePath, project, savedAt) {
+  const recentPath = projectFile.recentPathFor(app.getPath('userData'));
+  const list = projectFile.readRecent(recentPath);
+  projectFile.writeRecent(recentPath, projectFile.updateRecentList(list, recentEntryFor(filePath, project, savedAt)));
+}
+
+/** Tulis autosave (dipanggil timer 60 dtk dan saat app quit). */
+function persistAutosave() {
+  if (!autosaveDirty || !autosaveSnapshot) return null;
+  const now = new Date().toISOString();
+  const manifest = projectFile.buildManifest({
+    project: autosaveSnapshot,
+    appVersion: appVersionSafe(),
+    now,
+    projectId: currentProjectId || undefined,
+  });
+  if (!currentProjectId) currentProjectId = manifest.projectId;
+  const buffer = projectFile.packProject(manifest);
+  const target = projectFile.autosavePathFor(app.getPath('userData'));
+  projectFile.writeProjectFile(target, buffer);
+  autosaveLastAt = now;
+  // Snapshot terbaru sudah di disk; tulis lagi hanya saat ada perubahan baru.
+  autosaveDirty = false;
+  logger.info(`[project] autosave ditulis (${buffer.length} bytes)`);
+  return { path: target, savedAt: now };
+}
+
+function clearAutosaveFile() {
+  const target = projectFile.autosavePathFor(app.getPath('userData'));
+  try { fs.rmSync(target, { force: true }); } catch { /* ignore */ }
+}
+
+function startAutosaveTimer() {
+  if (autosaveTimer) clearInterval(autosaveTimer);
+  autosaveTimer = setInterval(() => {
+    try {
+      persistAutosave();
+    } catch (error) {
+      logger.warn(`[project] autosave gagal: ${error && error.message ? error.message : 'unknown'}`);
+    }
+  }, AUTOSAVE_INTERVAL_MS);
+  if (typeof autosaveTimer.unref === 'function') autosaveTimer.unref();
 }
 
 /**
@@ -256,6 +348,11 @@ function createWindow() {
 app.whenReady().then(() => {
   installSessionHardening();
   createWindow();
+  startAutosaveTimer();
+});
+app.on('before-quit', () => {
+  if (autosaveTimer) clearInterval(autosaveTimer);
+  try { persistAutosave(); } catch { /* jangan blokir quit */ }
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
@@ -605,6 +702,177 @@ secretHandle('settings:set', async (_event, input) => {
   const payload = input && typeof input === 'object' ? input : {};
   const store = getSecretStore();
   return store.setPreference(payload.key, payload.value);
+});
+
+/* ------------------------------------------------------------------ *
+ * IPC: proyek `.keylox` (M2-A / U8)
+ *
+ * Nama channel mengikuti kontrak §2.1 (`project:save`, `project:open`) dan
+ * tambahan yang diminta milestone (`project:recent`, `project:markDirty`).
+ * Catatan deviasi: `project:save` menerima snapshot proyek langsung karena
+ * belum ada lapisan SQLite di desktop (kontrak asli memakai `projectId`).
+ * ------------------------------------------------------------------ */
+
+secretHandle('project:save', async (_event, input) => {
+  const payload = input && typeof input === 'object' ? input : {};
+  const project = payload.project && typeof payload.project === 'object' ? payload.project : null;
+  if (!project) {
+    throw new KeyloxError('ERR_VALIDATION_PAYLOAD', 'Snapshot proyek tidak valid.');
+  }
+
+  let target = null;
+  if (payload.saveAs !== true && typeof payload.filePath === 'string' && payload.filePath) {
+    target = projectFile.validateProjectPath(payload.filePath);
+    if (!allowedProjectPaths.has(target)) {
+      throw new KeyloxError('ERR_FS_PERMISSION', 'Path proyek harus dipilih lewat dialog Simpan.');
+    }
+  }
+
+  if (!target) {
+    const choice = await dialog.showSaveDialog(mainWindow, {
+      title: 'Simpan proyek Keylox',
+      defaultPath: `${safeProjectName(project.name)}${projectFile.PROJECT_EXT}`,
+      filters: [{ name: 'Keylox Project', extensions: ['keylox'] }],
+    });
+    if (choice.canceled || !choice.filePath) {
+      return { ok: false, canceled: true };
+    }
+    target = projectFile.validateProjectPath(
+      projectFile.ensureProjectExtension(choice.filePath)
+    );
+    allowedProjectPaths.add(target);
+  }
+
+  const previous = readExistingManifestMeta(target);
+  const now = new Date().toISOString();
+  const manifest = projectFile.buildManifest({
+    project,
+    appVersion: appVersionSafe(),
+    now,
+    projectId: (previous && previous.projectId) || currentProjectId || undefined,
+    createdAt: previous && previous.createdAt ? previous.createdAt : undefined,
+    mediaHashes: projectFile.hashProjectMedia(project),
+  });
+  currentProjectId = manifest.projectId;
+
+  const buffer = projectFile.packProject(manifest, { includeMedia: payload.includeMedia === true });
+  const written = projectFile.writeProjectFile(target, buffer);
+  rememberRecent(target, project, now);
+
+  autosaveSnapshot = JSON.parse(JSON.stringify(project));
+  autosaveDirty = false;
+  autosaveLastAt = now;
+  clearAutosaveFile();
+
+  logger.info(`[project] disimpan (${written.size} bytes, ${manifest.tracks.length} track)`);
+  return {
+    ok: true,
+    filePath: written.filePath,
+    size: written.size,
+    savedAt: now,
+    projectId: manifest.projectId,
+  };
+});
+
+secretHandle('project:open', async (_event, input) => {
+  const payload = input && typeof input === 'object' ? input : {};
+  let target;
+
+  if (payload.autosave === true) {
+    target = projectFile.autosavePathFor(app.getPath('userData'));
+    if (!fs.existsSync(target)) {
+      throw new KeyloxError('ERR_VALIDATION_PAYLOAD', 'Tidak ada autosave untuk dipulihkan.');
+    }
+  } else if (typeof payload.filePath === 'string' && payload.filePath) {
+    target = projectFile.validateProjectPath(payload.filePath);
+  } else {
+    const choice = await dialog.showOpenDialog(mainWindow, {
+      title: 'Buka proyek Keylox',
+      properties: ['openFile'],
+      filters: [{ name: 'Keylox Project', extensions: ['keylox'] }],
+    });
+    if (choice.canceled || !choice.filePaths[0]) {
+      return { ok: false, canceled: true };
+    }
+    target = projectFile.validateProjectPath(choice.filePaths[0]);
+  }
+
+  const parsed = projectFile.readProjectFile(target);
+  // Hash file media besar mahal; saat buka cukup cek keberadaan path. Hash tetap
+  // disimpan di manifest dan dipakai saat relink/simpan berikutnya.
+  const { missing } = projectFile.mediaStatus(parsed.manifest, { verifyHash: false });
+  currentProjectId = parsed.manifest.projectId || null;
+  allowedProjectPaths.add(target);
+
+  const fromAutosave = payload.autosave === true;
+  if (!fromAutosave) rememberRecent(target, parsed.project, parsed.manifest.updatedAt);
+
+  autosaveSnapshot = JSON.parse(JSON.stringify(parsed.project));
+  autosaveDirty = false;
+  autosaveLastAt = parsed.manifest.updatedAt || null;
+
+  logger.info(`[project] dibuka (${parsed.manifest.tracks.length} track, ${missing.length} media perlu relink)`);
+  return {
+    ok: true,
+    filePath: target,
+    autosave: fromAutosave,
+    project: parsed.project,
+    missingMedia: missing,
+    manifestMeta: {
+      projectId: parsed.manifest.projectId,
+      appVersion: parsed.manifest.appVersion,
+      formatVersion: parsed.manifest.formatVersion,
+      schemaVersion: parsed.manifest.schemaVersion,
+      updatedAt: parsed.manifest.updatedAt,
+      mediaMode: parsed.manifest.mediaMode,
+    },
+  };
+});
+
+secretHandle('project:recent', async () => {
+  const recentPath = projectFile.recentPathFor(app.getPath('userData'));
+  const items = projectFile.readRecent(recentPath).filter((item) => {
+    try { return fs.existsSync(item.filePath); } catch { return false; }
+  });
+
+  const autosavePath = projectFile.autosavePathFor(app.getPath('userData'));
+  let autosave = null;
+  if (fs.existsSync(autosavePath)) {
+    try {
+      const parsed = projectFile.readProjectFile(autosavePath);
+      const clipCount = parsed.manifest.tracks.reduce(
+        (sum, track) => sum + (Array.isArray(track.clips) ? track.clips.length : 0),
+        0
+      );
+      autosave = {
+        available: true,
+        path: autosavePath,
+        name: parsed.manifest.project.name,
+        savedAt: parsed.manifest.updatedAt,
+        clipCount,
+        corrupt: false,
+      };
+    } catch {
+      autosave = { available: true, path: autosavePath, corrupt: true };
+    }
+  }
+  return { items, autosave };
+});
+
+secretHandle('project:markDirty', async (_event, input) => {
+  const payload = input && typeof input === 'object' ? input : {};
+  if (payload.discardAutosave === true) {
+    clearAutosaveFile();
+    autosaveSnapshot = null;
+    autosaveDirty = false;
+    autosaveLastAt = null;
+    return { ok: true, dirty: false, autosaveAt: null, discarded: true };
+  }
+  if (payload.project && typeof payload.project === 'object') {
+    autosaveSnapshot = JSON.parse(JSON.stringify(payload.project));
+  }
+  autosaveDirty = payload.dirty === true;
+  return { ok: true, dirty: autosaveDirty, autosaveAt: autosaveLastAt };
 });
 
 /* ------------------------------------------------------------------ *

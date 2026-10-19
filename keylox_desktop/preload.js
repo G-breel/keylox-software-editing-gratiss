@@ -42,6 +42,11 @@ const INVOKE_CHANNELS = Object.freeze({
   'ffmpeg:thumbnail': true,
   // §2.11.2 — seeding E2E (di-gate di MAIN: NODE_ENV=test | KEYLOX_E2E=1)
   'project:createWithMedia': true,
+  // §2.1 + M2-A — proyek `.keylox` (manifest + ZIP)
+  'project:save': true,
+  'project:open': true,
+  'project:recent': true,
+  'project:markDirty': true,
   // §2.7 — preferensi NON-rahasia (backendBaseUrl, mode, …). Rahasia ditolak di main.
   'settings:get': true,
   'settings:set': true,
@@ -205,6 +210,43 @@ const keylox = {
      * channel ini tidak terdaftar → `ERR_IPC_CHANNEL_DENIED`.
      */
     createWithMedia: (spec) => (isPlainObject(spec) ? invoke('project:createWithMedia', spec) : Promise.reject(deniedError('project:createWithMedia'))),
+
+    /**
+     * Simpan snapshot proyek ke `.keylox`. Tanpa `filePath`/dengan `saveAs`,
+     * MAIN membuka dialog native. Penulisan hanya ke path yang dipilih user.
+     */
+    save: (input) => {
+      const payload = isPlainObject(input) ? input : {};
+      if (!isPlainObject(payload.project)) {
+        return Promise.reject(validationError('Snapshot proyek tidak valid.'));
+      }
+      const safe = { project: payload.project };
+      if (payload.saveAs === true) safe.saveAs = true;
+      if (payload.includeMedia === true) safe.includeMedia = true;
+      if (isPathArg(payload.filePath)) safe.filePath = payload.filePath;
+      return invoke('project:save', safe).then((r) => unwrap('project:save', r));
+    },
+
+    /** Buka `.keylox` (dialog bila `filePath` kosong) atau autosave. */
+    open: (input) => {
+      const payload = isPlainObject(input) ? input : {};
+      const safe = {};
+      if (payload.autosave === true) safe.autosave = true;
+      else if (isPathArg(payload.filePath)) safe.filePath = payload.filePath;
+      return invoke('project:open', safe).then((r) => unwrap('project:open', r));
+    },
+
+    /** `{ items, autosave }` — daftar proyek terakhir + kandidat pemulihan. */
+    recent: () => invoke('project:recent').then((r) => unwrap('project:recent', r)),
+
+    /** Tandai perubahan + simpan snapshot untuk autosave 60 dtk di MAIN. */
+    markDirty: (input) => {
+      const payload = isPlainObject(input) ? input : {};
+      const safe = { dirty: payload.dirty === true };
+      if (payload.discardAutosave === true) safe.discardAutosave = true;
+      if (isPlainObject(payload.project)) safe.project = payload.project;
+      return invoke('project:markDirty', safe).then((r) => unwrap('project:markDirty', r));
+    },
   },
 
   settings: {

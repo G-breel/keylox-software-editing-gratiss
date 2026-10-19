@@ -14,7 +14,19 @@ export const ExportDialog: React.FC<{ open: boolean; onClose: () => void }> = ({
   const [status, setStatus] = useState('');
 
   useEffect(() => {
-    if (open) { setProgress(0); setRunning(false); setStatus(''); }
+    if (!open) return;
+    setProgress(0);
+    setRunning(false);
+    setStatus('');
+    // Pulihkan pengaturan export terakhir dari manifest proyek (bila ada).
+    const last = useEditorStore.getState().lastExport as Record<string, unknown> | null;
+    if (last) {
+      if (typeof last.format === 'string') setFormat(last.format);
+      if (typeof last.resolution === 'string') setResolutionSel(last.resolution);
+      if (last.fps !== undefined && last.fps !== null) setFps(String(last.fps));
+      const bitrateValue = Number(last.bitrate);
+      if (Number.isFinite(bitrateValue) && bitrateValue > 0) setBitrate(bitrateValue);
+    }
   }, [open]);
 
   useEffect(() => {
@@ -50,6 +62,7 @@ export const ExportDialog: React.FC<{ open: boolean; onClose: () => void }> = ({
     if (!clip) { setStatus('Pilih klip dulu.'); return; }
     const outPath = await api.saveFile('edited.' + format);
     if (!outPath) return;
+    store.setLastExport({ format, resolution: resolutionSel, fps, bitrate });
     setRunning(true);
     setStatus('Processing...');
     const vf = buildVF();

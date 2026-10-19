@@ -1,37 +1,128 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useEditorStore } from '../stores/editorStore';
 import { fileUrl } from '../lib/utils';
+import { Clip } from '../lib/types';
+import { activeClipAt, clipSourceTime, totalDurationSec } from '../lib/timeline';
 import { TrackingPanel } from './TrackingPanel';
 
+function cssFilterFor(clip: Clip | null): string {
+  if (!clip) return '';
+  const f = clip.filters;
+  return `brightness(${f.brightness}) contrast(${f.contrast}) saturate(${f.saturation}) hue-rotate(${f.hue}deg) blur(${f.blur}px)`
+    + (f.grayscale ? ' grayscale(1)' : '')
+    + (f.sepia ? ' sepia(1)' : '');
+}
+
+function transformFor(clip: Clip | null): string {
+  if (!clip) return '';
+  return `rotate(${clip.transform.rotate}deg) ${clip.transform.flipH ? 'scaleX(-1)' : ''} ${clip.transform.flipV ? 'scaleY(-1)' : ''}`;
+}
+
+/**
+ * Preview sinkron dengan playhead (U3 dasar):
+ * - klip yang tampil = klip video di posisi playhead (bukan sekadar seleksi);
+ * - `currentTime` = `in + (playhead - start)`;
+ * - play/pause menggerakkan playhead lewat rAF; seek dihormati saat pause.
+ * Filter/transform CSS yang sudah ada tetap dipakai.
+ */
 export const PreviewPlayer: React.FC = () => {
   const store = useEditorStore();
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [trackingOpen, setTrackingOpen] = useState(false);
-  const clip = store.getSelectedClip();
-  const src = clip?.path || store.tracks.flatMap(t=>t.clips)[0]?.path;
+  const srcRef = useRef<string | null>(null);
 
-  const cssFilter = clip ? `brightness(${clip.filters.brightness}) contrast(${clip.filters.contrast}) saturate(${clip.filters.saturation}) hue-rotate(${clip.filters.hue}deg) blur(${clip.filters.blur}px)` + (clip.filters.grayscale ? ' grayscale(1)' : '') + (clip.filters.sepia ? ' sepia(1)' : '') : '';
-  const transform = clip ? `rotate(${clip.transform.rotate}deg) ${clip.transform.flipH ? 'scaleX(-1)' : ''} ${clip.transform.flipV ? 'scaleY(-1)' : ''}` : '';
+  const playheadSec = store.playhead / 1000;
+  const active = useMemo(
+    () => activeClipAt(store.tracks, playheadSec),
+    [store.tracks, playheadSec],
+  );
+  const clip = active?.clip ?? null;
+  const track = active?.track ?? null;
+  const src = clip?.path ?? null;
+  const expectedTime = clip ? clipSourceTime(clip, playheadSec) : 0;
+  const duration = totalDurationSec(store.tracks);
 
+  const cssFilter = cssFilterFor(clip);
+  const transform = transformFor(clip);
+
+  /* Sumber video: ganti hanya saat klip aktif berubah. */
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
     if (src) {
-      if (v.src !== fileUrl(src)) v.src = fileUrl(src);
+      const next = fileUrl(src);
+      if (srcRef.current !== src) {
+        srcRef.current = src;
+        v.src = next;
+        v.load();
+      }
     } else {
+      srcRef.current = null;
       v.removeAttribute('src');
       v.load();
     }
   }, [src]);
 
+  /* Seek/scrub: saat pause, ikuti playhead dengan presisi. */
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v || !src) return;
+    const apply = () => {
+      const target = Math.max(0, expectedTime);
+      // Saat playing, koreksi hanya bila drift besar (hindari stutter tiap frame).
+      const threshold = useEditorStore.getState().isPlaying ? 0.3 : 0.02;
+      if (Number.isFinite(target) && Math.abs(v.currentTime - target) > threshold) {
+        try { v.currentTime = target; } catch { /* metadata belum siap */ }
+      }
+    };
+    apply();
+    v.addEventListener('loadedmetadata', apply);
+    return () => v.removeEventListener('loadedmetadata', apply);
+  }, [expectedTime, src, store.isPlaying]);
+
+  /* Play/pause video + properti audio/kecepatan. */
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
     v.playbackRate = clip?.speed || 1;
-    v.volume = Math.min(1, clip?.volume ?? 1);
-    v.muted = clip?.muted ?? false;
-  }, [clip]);
+    v.volume = Math.min(1, Math.max(0, clip?.volume ?? 1));
+    const muted = clip?.muted === true || clip?.removeAudio === true || track?.muted === true || track?.visible === false;
+    v.muted = muted;
+    if (!clip) {
+      v.pause();
+      return;
+    }
+    if (store.isPlaying) {
+      void v.play().catch(() => { /* autoplay/format tidak didukung */ });
+    } else {
+      v.pause();
+    }
+  }, [store.isPlaying, clip?.id, clip?.speed, clip?.volume, clip?.muted, clip?.removeAudio, track?.muted, track?.visible, src]);
+
+  /* Jam playback: playhead bergerak, preview mengikuti. */
+  useEffect(() => {
+    if (!store.isPlaying) return;
+    let raf = 0;
+    let last = performance.now();
+    const tick = (now: number) => {
+      const state = useEditorStore.getState();
+      if (!state.isPlaying) return;
+      const dt = Math.max(0, Math.min(250, now - last));
+      last = now;
+      const next = state.playhead + dt;
+      const endMs = totalDurationSec(state.tracks) * 1000;
+      if (endMs <= 0 || next >= endMs) {
+        state.setPlayhead(Math.max(0, endMs));
+        state.setPlaying(false);
+        return;
+      }
+      state.setPlayhead(next);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [store.isPlaying]);
 
   // WebGL canvas init (basic)
   useEffect(() => {
@@ -44,6 +135,12 @@ export const PreviewPlayer: React.FC = () => {
   }, []);
 
   const overlays = clip?.textOverlays || [];
+  const localOverlays = clip
+    ? overlays.filter((o) => {
+        const t = playheadSec - clip.start;
+        return t >= o.start && t <= o.end;
+      })
+    : [];
 
   return (
     <div className="flex-1 bg-black relative flex items-center justify-center overflow-hidden">
@@ -68,7 +165,7 @@ export const PreviewPlayer: React.FC = () => {
           className="absolute inset-0 pointer-events-none"
           style={{ width: '100%', height: '100%' }}
         />
-        {overlays.map((o) => (
+        {localOverlays.map((o) => (
           <div
             key={o.id}
             className="absolute pointer-events-none"
@@ -87,8 +184,8 @@ export const PreviewPlayer: React.FC = () => {
         ))}
       </div>
       {!src && (
-        <div className="absolute text-textMuted text-sm">
-          Tambah klip ke timeline atau jalankan perintah AI.
+        <div className="absolute text-textMuted text-sm text-center px-6">
+          {duration > 0 ? 'Tidak ada klip di posisi playhead.' : 'Tambah klip ke timeline atau jalankan perintah AI.'}
         </div>
       )}
     </div>
