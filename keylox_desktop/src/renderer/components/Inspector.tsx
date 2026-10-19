@@ -150,10 +150,23 @@ export const Inspector: React.FC<{ onExport: () => void }> = ({ onExport }) => {
         {tab === 'Audio' && (
           <div className="flex flex-col gap-2">
             <div className="flex gap-2 items-center">
+              <label className="text-xs text-textMuted w-16">Volume</label>
+              <input type="range" min="0" max="2" step="0.05" value={clip.volume} onChange={(e) => update({ volume: +e.target.value })} className="flex-1" />
+              <span className="text-xs w-10">{clip.volume.toFixed(2)}</span>
+            </div>
+            <div className="flex gap-2 items-center">
+              <label className="text-xs text-textMuted w-16">Pan</label>
+              <input type="range" min="-1" max="1" step="0.05" value={clip.pan ?? 0} onChange={(e) => update({ pan: +e.target.value })} className="flex-1" />
+              <span className="text-xs w-10">{(clip.pan ?? 0).toFixed(2)}</span>
+            </div>
+            <button className={`px-2 py-1 text-xs rounded w-fit ${clip.muted ? 'bg-danger text-white' : 'bg-elevated'}`} onClick={() => update({ muted: !clip.muted })}>
+              {clip.muted ? 'Unmute' : 'Mute'}
+            </button>
+            <div className="flex gap-2 items-center">
               <label className="text-xs text-textMuted w-16">Fade in</label>
-              <input type="number" step="0.1" value={clip.fadeIn} onChange={(e) => update({ fadeIn: +e.target.value })} className="w-20" />
+              <input type="number" step="0.1" min="0" value={clip.fadeIn} onChange={(e) => update({ fadeIn: +e.target.value })} className="w-20" />
               <label className="text-xs text-textMuted w-16">Fade out</label>
-              <input type="number" step="0.1" value={clip.fadeOut} onChange={(e) => update({ fadeOut: +e.target.value })} className="w-20" />
+              <input type="number" step="0.1" min="0" value={clip.fadeOut} onChange={(e) => update({ fadeOut: +e.target.value })} className="w-20" />
             </div>
             <label className="flex items-center gap-2 text-xs">
               <input type="checkbox" checked={clip.removeAudio} onChange={(e) => update({ removeAudio: e.target.checked })} />

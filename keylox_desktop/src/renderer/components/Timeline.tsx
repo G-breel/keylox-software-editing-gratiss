@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useEditorStore } from '../stores/editorStore';
 import { Clip, Track, TrackType } from '../lib/types';
+import { AudioWaveform } from './AudioWaveform';
 import { uid } from '../lib/utils';
 import {
   buildRulerTicks,
@@ -563,10 +564,19 @@ export const Timeline: React.FC = () => {
                         onDoubleClick={() => useEditorStore.getState().selectClip(clip.id)}
                         title={`${clip.name} · ${(clip.end - clip.start).toFixed(2)}s · in ${clipIn(clip).toFixed(2)} / out ${clipOut(clip).toFixed(2)}`}
                       >
-                        <div className="px-1.5 pt-0.5 text-[10px] text-textPrimary truncate pointer-events-none">
+                        {isAudioClipItem && (
+                          <AudioWaveform
+                            path={clip.path}
+                            inSec={clipIn(clip)}
+                            outSec={clipOut(clip)}
+                            width={width}
+                            height={ROW_H - 8}
+                          />
+                        )}
+                        <div className="relative z-10 px-1.5 pt-0.5 text-[10px] text-textPrimary truncate pointer-events-none">
                           {clip.name}
                         </div>
-                        <div className="px-1.5 text-[9px] text-textMuted truncate pointer-events-none font-mono">
+                        <div className="relative z-10 px-1.5 text-[9px] text-textMuted truncate pointer-events-none font-mono">
                           {isAudioClipItem ? 'audio' : 'video'} · {(clip.end - clip.start).toFixed(2)}s
                         </div>
                         {clip.muted && (

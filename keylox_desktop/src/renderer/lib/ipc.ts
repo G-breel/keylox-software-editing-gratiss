@@ -256,6 +256,7 @@ export interface KeyloxApi {
     probe: (p: string) => Promise<any>;
     export: (opts: any) => Promise<{ success: boolean; path?: string; error?: string }>;
     thumbnail: (p: string, tSec: number) => Promise<string | null>;
+    waveform: (p: string) => Promise<{ peaks: number[]; durationMs: number; sampleRate: number } | { error: string }>;
     onProgress: (cb: (v: number) => void) => () => void;
   };
   project: {
@@ -304,6 +305,7 @@ export interface Api {
   probe: (p: string) => Promise<any>;
   exportVideo: (opts: any) => Promise<{ success: boolean; path?: string; error?: string }>;
   thumbnail: (p: string, t: number) => Promise<string | null>;
+  waveform: (p: string) => Promise<{ peaks: number[]; durationMs: number; sampleRate: number } | { error: string }>;
   onProgress: (cb: (v: number) => void) => void | (() => void);
 }
 
@@ -440,6 +442,7 @@ function namespacedFromLegacy(legacy: Api): KeyloxApi {
       probe: (p) => legacy.probe(p),
       export: (opts) => legacy.exportVideo(opts),
       thumbnail: (p, t) => legacy.thumbnail(p, t),
+      waveform: (p) => legacy.waveform ? legacy.waveform(p) : Promise.resolve({ error: 'unavailable' }),
       onProgress: (cb) => {
         const off = legacy.onProgress(cb);
         return typeof off === 'function' ? off : () => {};
@@ -483,7 +486,7 @@ export const keylox: KeyloxApi = (() => {
     dialog: { openFiles: unavailable, openFolder: unavailable, saveFile: unavailable },
     fs: { readDir: unavailable, stat: unavailable },
     shell: { openPath: unavailable, openExternal: unavailable },
-    ffmpeg: { probe: unavailable, export: unavailable, thumbnail: unavailable, onProgress: () => () => {} },
+    ffmpeg: { probe: unavailable, export: unavailable, thumbnail: unavailable, waveform: unavailable, onProgress: () => () => {} },
     project: {
       createWithMedia: unavailable,
       save: unavailable,
@@ -517,5 +520,6 @@ export const api: Api = {
   probe: (p: string) => keylox.ffmpeg.probe(p),
   exportVideo: (opts: any) => keylox.ffmpeg.export(opts),
   thumbnail: (p: string, t: number) => keylox.ffmpeg.thumbnail(p, t),
+  waveform: (p: string) => keylox.ffmpeg.waveform(p),
   onProgress: (cb: (v: number) => void) => keylox.ffmpeg.onProgress(cb),
 };

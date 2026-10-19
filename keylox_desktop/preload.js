@@ -40,6 +40,7 @@ const INVOKE_CHANNELS = Object.freeze({
   'ffmpeg:probe': true,
   'ffmpeg:export': true,
   'ffmpeg:thumbnail': true,
+  'ffmpeg:waveform': true,
   // §2.11.2 — seeding E2E (di-gate di MAIN: NODE_ENV=test | KEYLOX_E2E=1)
   'project:createWithMedia': true,
   // §2.1 + M2-A — proyek `.keylox` (manifest + ZIP)
@@ -190,6 +191,7 @@ const keylox = {
     probe: (p) => (isPathArg(p) ? invoke('ffmpeg:probe', p) : Promise.resolve({ error: 'invalid path' })),
     export: (opts) => (isPlainObject(opts) ? invoke('ffmpeg:export', opts) : Promise.resolve({ success: false, error: 'invalid options' })),
     thumbnail: (p, t) => (isPathArg(p) ? invoke('ffmpeg:thumbnail', p, Number(t) || 0) : Promise.resolve(null)),
+    waveform: (p) => (isPathArg(p) ? invoke('ffmpeg:waveform', p) : Promise.resolve({ error: 'invalid path' })),
     /**
      * Langganan progress export. Mengembalikan fungsi unsubscribe (sinkron) agar
      * listener tidak menumpuk di renderer.

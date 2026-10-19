@@ -53,6 +53,7 @@ export interface Clip {
   speed: number;
   volume: number;
   muted: boolean;
+  pan?: number;
   filters: FilterState;
   transform: TransformState;
   textOverlays: TextOverlay[];

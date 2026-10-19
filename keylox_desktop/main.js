@@ -500,7 +500,22 @@ handle('ffmpeg:thumbnail', async (_event, filePath, timeSec) => {
 });
 
 /* ------------------------------------------------------------------ *
- * IPC: BYOK — secret & AI (api-contract v1.1 §2.12)
+ * IPC: Media - waveform (M2-B / DoU U5)
+ * ------------------------------------------------------------------ */
+
+handle('ffmpeg:waveform', async (_event, filePath) => {
+  const resolved = safeMediaFile(filePath);
+  if (!resolved) return { error: 'Path media tidak valid atau tidak diizinkan.' };
+  try {
+    const { generateWaveform } = require('./src/main/waveformService');
+    return await generateWaveform(resolved);
+  } catch (e) {
+    return { error: (e && e.message) ? e.message : 'Gagal membaca waveform.' };
+  }
+});
+
+/* ------------------------------------------------------------------ *
+ * IPC: BYOK - secret & AI (api-contract v1.1 §2.12)
  *
  * INVERSE RULE: renderer tidak pernah menerima key penuh. Satu-satunya bentuk
  * yang keluar dari main: `hasKey`, `masked`, `model` (§2.12 invarian #1).
