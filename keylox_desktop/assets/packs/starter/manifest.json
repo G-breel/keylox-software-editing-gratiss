@@ -1,0 +1,13 @@
+{
+  "id": "starter",
+  "name": "Keylox Starter Pack",
+  "version": "1.0.0",
+  "license": "CC0-1.0",
+  "description": "Paket awal efek warna (LUT) untuk Keylox. CC0 — bebas dipakai, dimodifikasi, dan didistribusikan tanpa atribusi.",
+  "author": "Keylox",
+  "items": [
+    { "id": "lut-warm", "type": "lut", "name": "Warm", "file": "luts/warm.cube", "description": "Hangat — cocok untuk vlog dan suasana sore." },
+    { "id": "lut-cool", "type": "lut", "name": "Cool", "file": "luts/cool.cube", "description": "Dingin — cocok untuk malam dan urban." },
+    { "id": "lut-cinematic", "type": "lut", "name": "Cinematic", "file": "luts/cinematic.cube", "description": "Kontras tinggi, bayangan teal, sorotan hangat." }
+  ]
+}
