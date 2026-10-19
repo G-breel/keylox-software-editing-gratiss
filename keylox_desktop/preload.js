@@ -39,6 +39,7 @@ const INVOKE_CHANNELS = Object.freeze({
   'shell:openPath': true,
   'ffmpeg:probe': true,
   'ffmpeg:export': true,
+  'ffmpeg:exportTimeline': true,
   'ffmpeg:thumbnail': true,
   'ffmpeg:waveform': true,
   // §2.11.2 — seeding E2E (di-gate di MAIN: NODE_ENV=test | KEYLOX_E2E=1)
@@ -57,6 +58,8 @@ const INVOKE_CHANNELS = Object.freeze({
   'settings:clearSecret': true,
   'settings:testProvider': true,
   'ai:invoke': true,
+  'ai:autoCaption': true,
+  'ai:sceneDetect': true,
   // §2.12.7 — onboarding "Dapatkan API Key Gratis" [BARU v1.2]
   'shell:openExternal': true,
   // §2.16 — transparansi token/biaya [BARU v1.2]
@@ -190,6 +193,7 @@ const keylox = {
   ffmpeg: {
     probe: (p) => (isPathArg(p) ? invoke('ffmpeg:probe', p) : Promise.resolve({ error: 'invalid path' })),
     export: (opts) => (isPlainObject(opts) ? invoke('ffmpeg:export', opts) : Promise.resolve({ success: false, error: 'invalid options' })),
+    exportTimeline: (opts) => (isPlainObject(opts) ? invoke('ffmpeg:exportTimeline', opts) : Promise.resolve({ success: false, error: 'invalid options' })),
     thumbnail: (p, t) => (isPathArg(p) ? invoke('ffmpeg:thumbnail', p, Number(t) || 0) : Promise.resolve(null)),
     waveform: (p) => (isPathArg(p) ? invoke('ffmpeg:waveform', p) : Promise.resolve({ error: 'invalid path' })),
     /**
@@ -340,6 +344,14 @@ const keylox = {
         payload: payload.payload,
       }).then((r) => unwrap('ai:invoke', r));
     },
+    autoCaption: (input) => {
+      const payload = isPlainObject(input) ? input : {};
+      return invoke('ai:autoCaption', payload);
+    },
+    sceneDetect: (input) => {
+      const payload = isPlainObject(input) ? input : {};
+      return invoke('ai:sceneDetect', payload);
+    },
   },
 
   /** §2.16 [BARU v1.2] — ringkasan token/biaya; tidak pernah memicu jaringan. */
@@ -463,6 +475,7 @@ const legacyApi = {
   openInFolder: deprecated('openInFolder', keylox.shell.openPath),
   probe: deprecated('probe', keylox.ffmpeg.probe),
   exportVideo: deprecated('exportVideo', keylox.ffmpeg.export),
+  exportTimeline: deprecated('exportTimeline', keylox.ffmpeg.exportTimeline),
   thumbnail: deprecated('thumbnail', keylox.ffmpeg.thumbnail),
   onProgress: deprecated('onProgress', keylox.ffmpeg.onProgress),
   // Aksesori baru lewat alias (dipakai index.html legacy).

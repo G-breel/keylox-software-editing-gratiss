@@ -255,6 +255,7 @@ export interface KeyloxApi {
   ffmpeg: {
     probe: (p: string) => Promise<any>;
     export: (opts: any) => Promise<{ success: boolean; path?: string; error?: string }>;
+    exportTimeline: (opts: any) => Promise<{ success: boolean; path?: string; error?: string }>;
     thumbnail: (p: string, tSec: number) => Promise<string | null>;
     waveform: (p: string) => Promise<{ peaks: number[]; durationMs: number; sampleRate: number } | { error: string }>;
     onProgress: (cb: (v: number) => void) => () => void;
@@ -276,6 +277,8 @@ export interface KeyloxApi {
   };
   ai: {
     invoke: (input: { provider: Provider; jobType: AiJobType; payload: Record<string, unknown> }) => Promise<AiInvokeResult<any>>;
+    autoCaption: (input?: { durationSec?: number }) => Promise<{ captions: Array<{ start: number; end: number; text: string }> }>;
+    sceneDetect: (input?: { durationSec?: number }) => Promise<{ scenes: Array<{ start: number; end: number }> }>;
   };
   /** §2.16 [v1.2] */
   usage: {
@@ -304,6 +307,7 @@ export interface Api {
   openInFolder: (p: string) => Promise<void>;
   probe: (p: string) => Promise<any>;
   exportVideo: (opts: any) => Promise<{ success: boolean; path?: string; error?: string }>;
+  exportTimeline: (opts: any) => Promise<{ success: boolean; path?: string; error?: string }>;
   thumbnail: (p: string, t: number) => Promise<string | null>;
   waveform: (p: string) => Promise<{ peaks: number[]; durationMs: number; sampleRate: number } | { error: string }>;
   onProgress: (cb: (v: number) => void) => void | (() => void);
@@ -441,6 +445,7 @@ function namespacedFromLegacy(legacy: Api): KeyloxApi {
     ffmpeg: {
       probe: (p) => legacy.probe(p),
       export: (opts) => legacy.exportVideo(opts),
+      exportTimeline: (opts) => (legacy.exportTimeline ? legacy.exportTimeline(opts) : Promise.reject(unavailableSilently())),
       thumbnail: (p, t) => legacy.thumbnail(p, t),
       waveform: (p) => legacy.waveform ? legacy.waveform(p) : Promise.resolve({ error: 'unavailable' }),
       onProgress: (cb) => {
@@ -463,7 +468,11 @@ function namespacedFromLegacy(legacy: Api): KeyloxApi {
       clearSecret: () => Promise.reject(unavailableSilently()),
       testProvider: () => Promise.resolve({ ok: false, latencyMs: null, error: { code: 'ERR_PROVIDER_UNREACHABLE', message: 'Preload lama tidak mendukung BYOK.' } }),
     },
-    ai: { invoke: () => Promise.reject(unavailableSilently()) },
+    ai: {
+    invoke: () => Promise.reject(unavailableSilently()),
+    autoCaption: () => Promise.reject(unavailableSilently()),
+    sceneDetect: () => Promise.reject(unavailableSilently()),
+  },
     usage: { get: () => Promise.reject(unavailableSilently()) },
     privacy: {
       getMode: () => Promise.resolve({ mode: 'standard' }),
@@ -486,7 +495,7 @@ export const keylox: KeyloxApi = (() => {
     dialog: { openFiles: unavailable, openFolder: unavailable, saveFile: unavailable },
     fs: { readDir: unavailable, stat: unavailable },
     shell: { openPath: unavailable, openExternal: unavailable },
-    ffmpeg: { probe: unavailable, export: unavailable, thumbnail: unavailable, waveform: unavailable, onProgress: () => () => {} },
+    ffmpeg: { probe: unavailable, export: unavailable, exportTimeline: unavailable, thumbnail: unavailable, waveform: unavailable, onProgress: () => () => {} },
     project: {
       createWithMedia: unavailable,
       save: unavailable,
@@ -519,6 +528,7 @@ export const api: Api = {
   openInFolder: (p: string) => keylox.shell.openPath(p),
   probe: (p: string) => keylox.ffmpeg.probe(p),
   exportVideo: (opts: any) => keylox.ffmpeg.export(opts),
+  exportTimeline: (opts: any) => keylox.ffmpeg.exportTimeline(opts),
   thumbnail: (p: string, t: number) => keylox.ffmpeg.thumbnail(p, t),
   waveform: (p: string) => keylox.ffmpeg.waveform(p),
   onProgress: (cb: (v: number) => void) => keylox.ffmpeg.onProgress(cb),

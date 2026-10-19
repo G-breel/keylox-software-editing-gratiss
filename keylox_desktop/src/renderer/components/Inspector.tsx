@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useEditorStore } from '../stores/editorStore';
 import { defaultFilters, defaultTransform } from '../lib/types';
 
-const TABS = ['Basic', 'Transform', 'Filter', 'Text', 'Audio'] as const;
+const TABS = ['Basic', 'Transform', 'Filter', 'Text', 'Audio', 'Transisi'] as const;
 type Tab = typeof TABS[number];
 
 export const Inspector: React.FC<{ onExport: () => void }> = ({ onExport }) => {
@@ -151,6 +151,40 @@ export const Inspector: React.FC<{ onExport: () => void }> = ({ onExport }) => {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+        {tab === 'Transisi' && (
+          <div className="flex flex-col gap-2">
+            <div className="flex gap-2 items-center">
+              <label className="text-xs text-textMuted w-16">Tipe</label>
+              <select
+                value={clip.transition?.type || 'none'}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === 'none') update({ transition: null });
+                  else update({ transition: { type: v as 'crossfade' | 'fadeblack' | 'slide', durationMs: clip.transition?.durationMs ?? 500 } });
+                }}
+                className="flex-1"
+              >
+                <option value="none">Tanpa transisi</option>
+                <option value="crossfade">Crossfade</option>
+                <option value="fadeblack">Fade to black</option>
+                <option value="slide">Slide</option>
+              </select>
+            </div>
+            {clip.transition && (
+              <div className="flex gap-2 items-center">
+                <label className="text-xs text-textMuted w-16">Durasi(s)</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={(clip.transition.durationMs ?? 500) / 1000}
+                  onChange={(e) => update({ transition: { ...clip.transition!, durationMs: Math.round(+e.target.value * 1000) } })}
+                  className="w-20"
+                />
+              </div>
+            )}
           </div>
         )}
         {tab === 'Audio' && (

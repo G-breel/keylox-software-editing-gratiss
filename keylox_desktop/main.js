@@ -31,7 +31,8 @@ const { createExternalLinks } = require('./src/main/externalLinks');
 const { buildExportPayload, writeExportFile } = require('./src/main/localDataExport');
 const projectFile = require('./src/main/projectFile');
 const { USAGE_RANGES } = require('./src/shared/usage.schema');
-const { buildAtempoFilters } = require('./src/main/exportPipeline');
+const { buildAtempoFilters, buildExportPlan } = require('./src/main/exportPipeline');
+const { getExportPreset } = require('./src/shared/exportPresets');
 const { DataWipeLocalSchema, DataExportLocalSchema } = require('./src/shared/privacy.schema');
 
 installConsoleRedaction(console);
@@ -485,6 +486,72 @@ handle('ffmpeg:export', async (event, opts) => {
   });
 });
 
+handle('ffmpeg:exportTimeline', async (event, payload) => {
+  const p = payload && typeof payload === 'object' ? payload : {};
+  const clips = Array.isArray(p.clips) ? p.clips : [];
+  const output = safeOutputPath(p.outputPath);
+  if (!output) return { success: false, error: 'Output path tidak valid (harus .mp4).' };
+
+  // Validasi setiap path klip.
+  for (let i = 0; i < clips.length; i++) {
+    const c = clips[i];
+    if (!c || typeof c !== 'object' || typeof c.path !== 'string') {
+      return { success: false, error: `Klip #${i + 1} tidak valid.` };
+    }
+    const resolved = safeMediaFile(c.path);
+    if (!resolved) {
+      return { success: false, error: `Path media klip #${i + 1} tidak valid atau tidak diizinkan.` };
+    }
+  }
+
+  // Resolve preset (id → preset penuh), lalu override field parsial.
+  let resolvedPreset = {};
+  if (p.preset && typeof p.preset === 'object') {
+    const base = (typeof p.preset.id === 'string' && p.preset.id)
+      ? getExportPreset(p.preset.id)
+      : getExportPreset();
+    resolvedPreset = Object.assign({}, base);
+    if (typeof p.preset.width === 'number') resolvedPreset.width = p.preset.width;
+    if (typeof p.preset.height === 'number') resolvedPreset.height = p.preset.height;
+    if (typeof p.preset.fps === 'number') resolvedPreset.fps = p.preset.fps;
+    if (typeof p.preset.crf === 'number') resolvedPreset.crf = p.preset.crf;
+  }
+
+  let plan;
+  try {
+    plan = buildExportPlan({
+      clips,
+      outputPath: output,
+      preset: Object.keys(resolvedPreset).length ? resolvedPreset : undefined,
+      hasAudio: p.hasAudio !== false,
+    });
+  } catch (err) {
+    return { success: false, error: (err && err.message) ? err.message : 'Gagal menyusun rencana export.' };
+  }
+
+  const { spawn } = require('child_process');
+  return new Promise((resolve) => {
+    const proc = spawn(ffmpegPath, plan.args, { windowsHide: true });
+    let stderr = '';
+    proc.stderr.on('data', (d) => {
+      const chunk = String(d);
+      stderr += chunk;
+      const m = chunk.match(/time=(\d+):(\d+):(\d+(?:\.\d+)?)/);
+      const frameMatch = chunk.match(/frame=\s*(\d+)/);
+      if (m && plan.durationMs > 0 && event.sender && !event.sender.isDestroyed()) {
+        const sec = Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]);
+        const pct = Math.min(100, (sec * 1000 / plan.durationMs) * 100);
+        event.sender.send('ffmpeg:progress', pct);
+      // frameMatch disimpan untuk kompatibilitas parsing baris `frame=` (tidak ada estimasi % tanpa total frame).
+    });
+    proc.on('close', (code) => {
+      if (code === 0) resolve({ success: true, path: output });
+      else resolve({ success: false, error: stderr.slice(-800) || `FFmpeg keluar dengan kode ${code}` });
+    });
+    proc.on('error', (e) => resolve({ success: false, error: e && e.message ? e.message : 'Gagal menjalankan FFmpeg.' }));
+  });
+});
+
 handle('ffmpeg:thumbnail', async (_event, filePath, timeSec) => {
   const input = safeMediaFile(filePath);
   if (!input) return null;
@@ -721,6 +788,30 @@ secretHandle('settings:set', async (_event, input) => {
   const payload = input && typeof input === 'object' ? input : {};
   const store = getSecretStore();
   return store.setPreference(payload.key, payload.value);
+});
+
+/* ------------------------------------------------------------------ *
+ * IPC: AI mock (Task 4 — auto-caption & scene-detect). Mock only, tanpa jaringan.
+ * ------------------------------------------------------------------ */
+
+handle('ai:autoCaption', async (_event, input) => {
+  const payload = input && typeof input === 'object' ? input : {};
+  const durationSec = typeof payload.durationSec === 'number' && payload.durationSec > 0 ? payload.durationSec : 30;
+  const captions = [];
+  for (let t = 0; t < durationSec; t += 3) {
+    captions.push({ start: t, end: Math.min(t + 3, durationSec), text: `[caption mock #${captions.length + 1}]` });
+  }
+  return { captions };
+});
+
+handle('ai:sceneDetect', async (_event, input) => {
+  const payload = input && typeof input === 'object' ? input : {};
+  const durationSec = typeof payload.durationSec === 'number' && payload.durationSec > 0 ? payload.durationSec : 30;
+  const scenes = [];
+  for (let t = 0; t < durationSec; t += 5) {
+    scenes.push({ start: t, end: Math.min(t + 5, durationSec) });
+  }
+  return { scenes };
 });
 
 /* ------------------------------------------------------------------ *

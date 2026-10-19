@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useEditorStore } from '../stores/editorStore';
 import { api } from '../lib/ipc';
+import { mapClipsToPipeline } from '../lib/exportMapping';
 
 export const ExportDialog: React.FC<{ open: boolean; onClose: () => void }> = ({ open, onClose }) => {
   const store = useEditorStore();
@@ -12,6 +13,7 @@ export const ExportDialog: React.FC<{ open: boolean; onClose: () => void }> = ({
   const [progress, setProgress] = useState(0);
   const [running, setRunning] = useState(false);
   const [status, setStatus] = useState('');
+  const [wholeTimeline, setWholeTimeline] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -59,12 +61,36 @@ export const ExportDialog: React.FC<{ open: boolean; onClose: () => void }> = ({
   };
 
   const handleExport = async () => {
-    if (!clip) { setStatus('Pilih klip dulu.'); return; }
-    const outPath = await api.saveFile('edited.' + format);
+    const outPath = await api.saveFile(wholeTimeline ? 'timeline.mp4' : ('edited.' + format));
     if (!outPath) return;
     store.setLastExport({ format, resolution: resolutionSel, fps, bitrate });
     setRunning(true);
     setStatus('Processing...');
+
+    if (wholeTimeline) {
+      const timelineClips = (store.tracks?.[0]?.clips || []).slice().sort((a, b) => a.start - b.start);
+      const mapped = mapClipsToPipeline(timelineClips);
+      if (mapped.length === 0) {
+        setRunning(false);
+        setStatus('Tidak ada klip di timeline.');
+        return;
+      }
+      const res = await api.exportTimeline({
+        clips: mapped,
+        outputPath: outPath,
+        preset: {
+          id: 'youtube-1080p',
+          fps: fps === 'original' ? undefined : +fps,
+        },
+        hasAudio: true,
+      });
+      setRunning(false);
+      if (res.success) { setStatus('Export selesai.'); api.openInFolder(res.path!); }
+      else { setStatus('Export error: ' + res.error); }
+      return;
+    }
+
+    if (!clip) { setRunning(false); setStatus('Pilih klip dulu.'); return; }
     const vf = buildVF();
     const af: string[] = [];
     if (clip.volume !== 1) af.push(`volume=${clip.volume}`);
@@ -136,10 +162,14 @@ export const ExportDialog: React.FC<{ open: boolean; onClose: () => void }> = ({
               <div className="text-xs text-textMuted mt-1">{progress.toFixed(0)}%</div>
             </div>
           )}
+          <div className="flex items-center gap-2">
+            <input type="checkbox" id="wholeTimeline" checked={wholeTimeline} onChange={(e) => setWholeTimeline(e.target.checked)} />
+            <label htmlFor="wholeTimeline" className="text-xs text-textMuted">🎥 Seluruh timeline (multi-clip)</label>
+          </div>
           {status && <div className="text-xs text-textMuted">{status}</div>}
           <div className="flex justify-end gap-2 mt-2">
             <button className="px-3 py-1.5 bg-elevated text-xs rounded" onClick={onClose} disabled={running}>Cancel</button>
-            <button className="px-3 py-1.5 bg-active text-white text-xs rounded font-semibold" onClick={handleExport} disabled={running || !clip}>
+            <button className="px-3 py-1.5 bg-active text-white text-xs rounded font-semibold" onClick={handleExport} disabled={running || (!wholeTimeline && !clip)}>
               Export
             </button>
           </div>

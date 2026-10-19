@@ -582,6 +582,9 @@ export const Timeline: React.FC = () => {
                         {clip.muted && (
                           <span className="absolute right-1 bottom-0.5 text-[8px] text-textMuted pointer-events-none">mute</span>
                         )}
+                        {clip.transition && (
+                          <span className="absolute right-1.5 top-0.5 text-[8px] text-active pointer-events-none">transisi</span>
+                        )}
                         <div
                           className="absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize bg-active/0 hover:bg-active/70 transition-colors duration-150 ease-out"
                           onPointerDown={(e) => onTrimPointerDown(e, clip, track, 'start')}

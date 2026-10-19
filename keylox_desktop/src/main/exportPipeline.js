@@ -209,6 +209,20 @@ function validateExportInput(input) {
         }
       }
     }
+
+    // Validasi transisi (Task 3) jika ada
+    if (clip.transition !== undefined && clip.transition !== null) {
+      if (typeof clip.transition !== 'object' || Array.isArray(clip.transition)) {
+        throw createValidationError(`Klip #${i + 1} memiliki transisi tidak valid.`);
+      }
+      const tType = clip.transition.type;
+      if (!['crossfade', 'fadeblack', 'slide'].includes(tType)) {
+        throw createValidationError(`Tipe transisi '${tType}' pada klip #${i + 1} tidak didukung.`);
+      }
+      if (clip.transition.durationMs !== undefined && clip.transition.durationMs !== null) {
+        validateNumber(clip.transition.durationMs, `clips[${i}].transition.durationMs`, 0, 60000);
+      }
+    }
   }
 
   // Validasi preset jika disediakan
@@ -339,6 +353,17 @@ function buildExportPlan(input) {
       vFilters.push('colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131');
     }
 
+    // Filter tambahan dari UI (chroma, drawtext, crop, blur, sharpen, …). Di-append
+    // sebelum scale/pad agar resolusi final tetap dikontrol preset.
+    if (typeof clip.extraVf === 'string' && clip.extraVf.trim() !== '' && clip.extraVf.trim() !== 'null') {
+      for (const part of clip.extraVf.split(',').map((s) => s.trim()).filter(Boolean)) {
+        if (containsDangerousTokens(part)) {
+          throw createValidationError(`Filter tambahan '${part}' ditolak oleh validasi keamanan.`);
+        }
+        vFilters.push(part);
+      }
+    }
+
     // Scale dan pad ke preset target
     vFilters.push(
       `scale=w=${width}:h=${height}:force_original_aspect_ratio=decrease`,
@@ -401,6 +426,16 @@ function buildExportPlan(input) {
         aFilters.push(`afade=t=out:st=${Number(fadeOutStart.toFixed(4))}:d=${msToSec(clip.fadeOutMs)}`);
       }
 
+      // Filter audio tambahan dari UI (volume/eq/afade manual, …).
+      if (typeof clip.extraAf === 'string' && clip.extraAf.trim() !== '' && clip.extraAf.trim() !== 'null') {
+        for (const part of clip.extraAf.split(',').map((s) => s.trim()).filter(Boolean)) {
+          if (containsDangerousTokens(part)) {
+            throw createValidationError(`Filter audio tambahan '${part}' ditolak oleh validasi keamanan.`);
+          }
+          aFilters.push(part);
+        }
+      }
+
       audioFilterChains.push({
         isSource: false,
         filter: aFilters.length > 0 ? aFilters.join(',') : null,
@@ -427,12 +462,11 @@ function buildExportPlan(input) {
       graphParts.push('[0:a]anull[a]');
     }
   } else {
-    // Multi-clip: buat label per klip lalu concat
-    const concatInputs = [];
-
+    // Multi-clip: per-klip stream video & audio
     for (let i = 0; i < numClips; i++) {
       graphParts.push(`[${i}:v]${videoFilterChains[i]}[v${i}]`);
-
+    }
+    for (let i = 0; i < numClips; i++) {
       const aChainInfo = audioFilterChains[i];
       if (aChainInfo.isSource) {
         graphParts.push(`${aChainInfo.filter}[a${i}]`);
@@ -441,11 +475,51 @@ function buildExportPlan(input) {
       } else {
         graphParts.push(`[${i}:a]anull[a${i}]`);
       }
-
-      concatInputs.push(`[v${i}][a${i}]`);
     }
 
-    graphParts.push(`${concatInputs.join('')}concat=n=${numClips}:v=1:a=1[v][a]`);
+    // Deteksi adanya transisi (Task 3)
+    const transMap = { crossfade: 'fade', fadeblack: 'fadeblack', slide: 'slideleft' };
+    const hasTransition = input.clips.some((c, i) => i < numClips - 1 && c && c.transition && transMap[c.transition.type]);
+
+    if (!hasTransition) {
+      const concatInputs = [];
+      for (let i = 0; i < numClips; i++) concatInputs.push(`[v${i}][a${i}]`);
+      graphParts.push(`${concatInputs.join('')}concat=n=${numClips}:v=1:a=1[v][a]`);
+    } else {
+      // Rantai xfade untuk video
+      const clipDurSec = (idx) => {
+        const c = input.clips[idx];
+        const speed = typeof c.speed === 'number' && c.speed > 0 ? c.speed : 1;
+        const inMs = typeof c.inMs === 'number' && c.inMs >= 0 ? c.inMs : 0;
+        const outMs = typeof c.outMs === 'number' && c.outMs > inMs ? c.outMs : null;
+        let rawMs;
+        if (outMs !== null) rawMs = outMs - inMs;
+        else if (c.durationMs && typeof c.durationMs === 'number') rawMs = c.durationMs;
+        else rawMs = c.isImage ? 5000 : 10000;
+        return (rawMs / speed) / 1000;
+      };
+
+      let accLabel = 'v0';
+      let accDur = clipDurSec(0);
+      for (let i = 1; i < numClips; i++) {
+        const trans = input.clips[i - 1].transition;
+        const validType = trans && transMap[trans.type];
+        const transDur = trans && Number.isFinite(trans.durationMs) ? trans.durationMs / 1000 : 0;
+        const outLabel = (i === numClips - 1) ? 'v' : `vx${i}`;
+        if (validType && transDur > 0) {
+          const offset = Math.max(0, accDur - transDur);
+          graphParts.push(`[${accLabel}][v${i}]xfade=transition=${validType}:duration=${transDur}:offset=${Number(offset.toFixed(4))}[${outLabel}]`);
+          accDur = accDur + clipDurSec(i) - transDur;
+        } else {
+          graphParts.push(`[${accLabel}][v${i}]concat=n=2:v=1:a=0[${outLabel}]`);
+          accDur = accDur + clipDurSec(i);
+        }
+        accLabel = outLabel;
+      }
+      // Audio: concat semua
+      const audioConcatInputs = Array.from({ length: numClips }, (_, i) => `[a${i}]`).join('');
+      graphParts.push(`${audioConcatInputs}concat=n=${numClips}:v=0:a=1[a]`);
+    }
   }
 
   const filterGraph = graphParts.join(';');

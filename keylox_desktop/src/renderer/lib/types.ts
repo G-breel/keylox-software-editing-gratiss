@@ -62,6 +62,8 @@ export interface Clip {
   removeAudio: boolean;
   chroma: boolean;
   chromaSim: number;
+  /** Transisi ke klip berikutnya (opsional). */
+  transition?: { type: 'crossfade' | 'fadeblack' | 'slide'; durationMs: number } | null;
 }
 
 export interface Track {

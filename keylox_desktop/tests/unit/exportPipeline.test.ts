@@ -189,6 +189,30 @@ describe('buildExportArgs', () => {
   });
 });
 
+describe('transisi (Task 3)', () => {
+  it('xfade muncul untuk crossfade', () => {
+    const inp = baseInput();
+    inp.clips.push({ ...inp.clips[0], path: 'C:/media/b.mp4' });
+    inp.clips[0].transition = { type: 'crossfade', durationMs: 500 };
+    const plan = buildExportPlan(inp);
+    expect(plan.filterGraph).toContain('xfade');
+    expect(plan.filterGraph).toContain('transition=fade');
+  });
+  it('offset benar (durasi klip1 - transisi)', () => {
+    const inp = baseInput();
+    inp.clips.push({ ...inp.clips[0], path: 'C:/media/b.mp4' });
+    inp.clips[0].transition = { type: 'crossfade', durationMs: 500 };
+    const plan = buildExportPlan(inp);
+    expect(plan.filterGraph).toContain('offset=4.5');
+  });
+  it('transition type invalid ditolak', () => {
+    const inp = baseInput();
+    inp.clips.push({ ...inp.clips[0], path: 'C:/media/b.mp4' });
+    inp.clips[0].transition = { type: 'foo' as any, durationMs: 500 };
+    expect(() => buildExportPlan(inp)).toThrow();
+  });
+});
+
 describe('exportPresets', () => {
   it('minimal 7 preset & getExportPreset fallback', () => {
     const list = presets.listExportPresets();
