@@ -1,0 +1,251 @@
+# =============================================================================
+# Keylox Desktop — CI (Stage 9 / DevOps)
+# =============================================================================
+# Urutan gate (gagal di tahap mana pun = pipeline merah, tidak ada rilis):
+#
+#   install (npm ci, cached)
+#      └─► [1] secret-scan   <-- GATE KERAS: temuan key = pipeline berhenti di sini
+#             └─► [2] lint (node --check) + typecheck (tsc --noEmit)
+#                    └─► [3] test unit (vitest)  ||  test backend (node --test)
+#                           └─► [4] build renderer (secret-scan + vite build)
+#                                  └─► [5] (manual) package .exe — butuh jaringan
+#
+# Runner: windows-latest = platform primer produk (docs/superapp/00-spec.md §2.2),
+# dan sama dengan lingkungan tempat seluruh gate ini diverifikasi (Node 24.11.0).
+# Lane Linux/macOS sengaja belum dinyalakan: sebagian tes memakai asumsi path
+# Windows (tests/unit/securityGuards.test.ts) dan belum diverifikasi di POSIX.
+#
+# Rahasia TIDAK PERNAH masuk CI: tidak ada secret yang dipakai di sini. Backend
+# test memakai MOCK_AI=true + JWT_SECRET dummy yang di-inject oleh helper tes
+# (tests/backend/helpers/server.js) — tanpa jaringan, tanpa kuota.
+# =============================================================================
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Prinsip least-privilege: pipeline ini hanya membaca kode.
+permissions:
+  contents: read
+
+# Push berturut-turut membatalkan run lama (hemat menit CI).
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Sama dengan versi Node yang dipakai verifikasi lokal (v24.11.0).
+  NODE_VERSION: '24'
+  CI: 'true'
+
+defaults:
+  run:
+    working-directory: keylox_desktop
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # [1] SECRET SCAN — gate pertama, tidak boleh dilewati apa pun.
+  #     Gagal (exit 1) bila menemukan string menyerupai kunci API
+  #     (AIza..., sk-..., AKIA..., PEM, JWT hardcoded, rahasia di query string)
+  #     di kode yang ikut ter-bundle. Lihat docs/superapp/byok-api-key.md §6.
+  # ---------------------------------------------------------------------------
+  secret-scan:
+    name: '[1] secret-scan (gate)'
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            keylox_desktop/package-lock.json
+            keylox_desktop/backend/package-lock.json
+
+      - name: Install (npm ci)
+        run: npm ci --no-audit --no-fund
+
+      # Pemindaian penuh termasuk berkas contoh env (backend/.env.example).
+      - name: Secret scan (seluruh tree)
+        run: node scripts/secret-scan.mjs main.js preload.js index.html src scripts backend backend/.env.example
+
+      # Dokumen sering jadi tempat orang menempelkan contoh key.
+      - name: Secret scan dokumen pipeline
+        working-directory: .
+        run: node keylox_desktop/scripts/secret-scan.mjs keylox/docs keylox_desktop/backend/.env.example
+
+      - name: Pastikan tidak ada berkas rahasia yang ikut ter-checkout/ter-commit
+        shell: pwsh
+        working-directory: .
+        run: |
+          $tracked = git ls-files
+          $forbidden = $tracked | Where-Object {
+            $_ -match '(^|/)\.env$' -or
+            $_ -match '\.env\.(local|production|staging|development)$' -or
+            $_ -match '\.(enc|pem|p12|pfx|keystore|jks)$' -or
+            $_ -match '(^|/)tok(en)?\.json$'
+          }
+          if ($forbidden) {
+            Write-Error "Berkas rahasia ikut ter-commit: $($forbidden -join ', ')"
+            exit 1
+          }
+          Write-Host "OK: tidak ada berkas rahasia yang ter-track git."
+
+  # ---------------------------------------------------------------------------
+  # [2] LINT + TYPECHECK (statis, tanpa menjalankan aplikasi)
+  # ---------------------------------------------------------------------------
+  lint-typecheck:
+    name: '[2] lint + typecheck'
+    needs: secret-scan
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: keylox_desktop/package-lock.json
+
+      - name: Install (npm ci)
+        run: npm ci --no-audit --no-fund
+
+      # `node --check` = parse/syntax gate untuk proses main (CommonJS, bukan TS).
+      - name: Lint (syntax main process)
+        run: npm run lint
+
+      - name: Typecheck (tsc --noEmit)
+        run: npx tsc --noEmit
+
+  # ---------------------------------------------------------------------------
+  # [3] TEST — unit (vitest) & backend (node:test) berjalan paralel.
+  #     fail-fast: false -> kegagalan satu lane tidak menyembunyikan lane lain.
+  # ---------------------------------------------------------------------------
+  test:
+    name: '[3] test ${{ matrix.suite }}'
+    needs: lint-typecheck
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [unit, backend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            keylox_desktop/package-lock.json
+            keylox_desktop/backend/package-lock.json
+
+      - name: Install (npm ci)
+        run: npm ci --no-audit --no-fund
+
+      # Backend test men-spawn `backend/src/index.js` apa adanya -> butuh dependensi backend.
+      - name: Install backend deps
+        working-directory: keylox_desktop/backend
+        run: npm ci --no-audit --no-fund
+
+      - name: Test unit (vitest)
+        if: matrix.suite == 'unit'
+        run: npm run test:unit
+
+      - name: Test backend (node:test, MOCK_AI, tanpa jaringan)
+        if: matrix.suite == 'backend'
+        run: npm run test:backend
+
+  # ---------------------------------------------------------------------------
+  # [4] BUILD RENDERER — vite build (dan secret-scan diulang atas bundle hasil).
+  #     Artefak diunggah supaya tahap packaging memakai bundle yang SAMA.
+  # ---------------------------------------------------------------------------
+  build-renderer:
+    name: '[4] build renderer (vite)'
+    needs: test
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: keylox_desktop/package-lock.json
+
+      - name: Install (npm ci)
+        run: npm ci --no-audit --no-fund
+
+      - name: Build renderer (secret-scan -> vite build)
+        run: npm run build:renderer
+
+      # Gate ulang: bundle hasil build tidak boleh mengandung rahasia.
+      - name: Secret scan atas bundle (dist/renderer)
+        run: node scripts/secret-scan.mjs dist/renderer main.js preload.js
+
+      - name: Ikon aplikasi (deterministik, tanpa dependensi)
+        run: npm run icons
+
+      - name: Unggah artefak renderer + ikon
+        uses: actions/upload-artifact@v4
+        with:
+          name: renderer-dist
+          path: |
+            keylox_desktop/dist/renderer
+            keylox_desktop/assets
+          retention-days: 7
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # [5] PACKAGE .EXE — MANUAL (workflow_dispatch) saja.
+  #     Alasan: `electron-builder` mengunduh Electron + nsis (~150-250 MB) dari
+  #     GitHub setiap run. Di CI ini jalan; di mesin pengembang tanpa internet
+  #     tahap ini GAGAL — lihat status NOT-VERIFIED di docs/superapp/07-pipeline.md.
+  # ---------------------------------------------------------------------------
+  package-windows:
+    name: '[5] package .exe (manual)'
+    if: github.event_name == 'workflow_dispatch'
+    needs: build-renderer
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: keylox_desktop/package-lock.json
+
+      - name: Install (npm ci)
+        run: npm ci --no-audit --no-fund
+
+      - name: Build + package (NSIS installer + portable)
+        run: npm run build
+        env:
+          # Tanpa sertifikat code signing: paket TIDAK ditandatangani (SMARTSCREEN akan
+          # memperingatkan). Signing diaktifkan hanya bila secret tersedia.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Daftar artefak rilis
+        shell: pwsh
+        run: Get-ChildItem release -Recurse -File | Select-Object FullName, Length
+
+      - name: Unggah installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: keylox-windows-installer
+          path: |
+            keylox_desktop/release/*.exe
+            keylox_desktop/release/*.blockmap
+          retention-days: 14
+          if-no-files-found: error

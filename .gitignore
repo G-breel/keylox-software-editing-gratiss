@@ -1,0 +1,118 @@
+# =============================================================================
+# Keylox — .gitignore root (Stage 9 / DevOps)
+# =============================================================================
+# Aturan emas: TIDAK ADA rahasia yang boleh masuk repo.
+#   - .env / *.enc / token dump  -> DIABAIKAN
+#   - contoh konfigurasi (x.env.example) -> TETAP di-commit (tanpa nilai rahasia)
+# Bila sebuah rahasia terlanjur ter-commit: hapus dari history (filter-repo)
+# DAN rotasi nilainya — history git tidak bisa "dilupakan".
+# =============================================================================
+
+# ---------- Rahasia & kredensial (WAJIB diabaikan) ----------
+.env
+.env.*
+!.env.example
+*.env.local
+*.enc
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+*.jks
+secrets/
+credentials/
+tok.json
+token.json
+
+# ---------- Dependensi (jangan pernah di-commit) ----------
+node_modules/
+**/node_modules/
+.pnpm-store/
+jspm_packages/
+
+# ---------- Log & artefak runtime ----------
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+keylox_desktop/err.txt
+keylox_desktop/out.txt
+err.txt
+out.txt
+*.tsbuildinfo
+
+# ---------- Build output / artefak rilis ----------
+dist/
+build/
+out/
+release/
+keylox_desktop/dist/
+keylox_desktop/out/
+keylox_desktop/release/
+dist-electron/
+.vite/
+coverage/
+*.exe
+*.msi
+*.appx
+*.dmg
+*.pkg
+*.AppImage
+*.deb
+*.rpm
+*.snap
+*.blockmap
+*.asar
+latest*.yml
+builder-debug.yml
+builder-effective-config.yaml
+
+# ---------- Java / Android (android_video_editor) ----------
+.gradle/
+android_video_editor/build/
+android_video_editor/app/build/
+*.apk
+*.aab
+*.xapk
+local.properties
+captures/
+.cxx/
+
+# ---------- Android Studio / IntelliJ ----------
+.idea/
+*.iml
+*.hprof
+
+# ---------- Python / notebook ----------
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.venv/
+venv/
+.env.venv
+
+# ---------- Test artefacts (Stage 7/QE) ----------
+test-results/
+playwright-report/
+keylox_desktop/tests/fixtures/media/
+keylox_desktop/tests/e2e/test-results/
+keylox_desktop/tests/e2e/playwright-report/
+
+# ---------- OS noise ----------
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# ---------- Dokumen sementara pipeline ----------
+keylox/docs/superapp/*.tmp
+
+# ---------- Eksperimen lama (BUKAN bagian Keylox) ----------
+# Artefak coba-coba sebelum proyek Keylox dimulai. Sengaja tidak di-commit.
+/android_video_editor/
+/ai_video_editor.html
+/ai_video_editor_full.html
+/comic_2panel.html
+/naruto_turnaround.html
+/comfyui_colab_manga.ipynb

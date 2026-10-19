@@ -1,0 +1,118 @@
+{
+  "name": "keylox-desktop",
+  "version": "1.0.0",
+  "description": "Keylox - AI Video Editor Desktop (CapCut-like) with Gemini AI control",
+  "author": "Keylox",
+  "main": "main.js",
+  "scripts": {
+    "start": "npm run build:renderer && electron .",
+    "dev": "npm run build:renderer && electron . --dev",
+    "secret-scan": "node scripts/secret-scan.mjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "node --check main.js && node --check preload.js",
+    "ci": "npm run secret-scan && npm run lint && npm run typecheck && npm test && npm run build:renderer",
+    "icons": "node scripts/make-icons.mjs",
+    "prepack": "npm run icons",
+    "prebuild": "npm run icons",
+    "prebuild:mac": "npm run icons",
+    "prebuild:linux": "npm run icons",
+    "build:renderer": "node scripts/secret-scan.mjs && vite build",
+    "test": "npm run test:unit && npm run test:backend",
+    "test:unit": "vitest run",
+    "test:unit:watch": "vitest",
+    "test:backend": "node --test \"tests/backend/*.test.js\"",
+    "pack": "npm run build:renderer && electron-builder --dir",
+    "build": "npm run build:renderer && electron-builder --win",
+    "build:mac": "npm run build:renderer && electron-builder --mac",
+    "build:linux": "npm run build:renderer && electron-builder --linux"
+  },
+  "build": {
+    "appId": "com.keylox.desktop",
+    "productName": "Keylox",
+    "directories": {
+      "output": "release",
+      "buildResources": "assets"
+    },
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "files": [
+      "**/*",
+      "!**/.env",
+      "!**/.env.*",
+      "!**/*.enc",
+      "!**/*.pem",
+      "!**/*.key",
+      "!**/*.p12",
+      "!**/*.pfx",
+      "!**/*.map",
+      "!**/*.md",
+      "!**/*.log",
+      "!err.txt",
+      "!out.txt",
+      "!backend/**",
+      "!tests/**",
+      "!scripts/**",
+      "!src/renderer/**",
+      "!release/**",
+      "!node_modules/.cache"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "artifactName": "${productName}-${version}-${os}-${arch}-setup.${ext}",
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "Keylox"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-${os}-${arch}-portable.${ext}"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "icon": "assets/icon.png",
+      "category": "public.app-category.video"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "assets/icon.png",
+      "category": "Video"
+    }
+  },
+  "engines": {
+    "node": ">=20.19"
+  },
+  "dependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "@google/generative-ai": "^0.21.0",
+    "electron-store": "^8.1.0",
+    "fluent-ffmpeg": "^2.1.3",
+    "immer": "^11.1.21",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "zod": "^3.25.76",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "autoprefixer": "^10.6.1",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.0.0",
+    "postcss": "^8.5.31",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.5"
+  }
+}

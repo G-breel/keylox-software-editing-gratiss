@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- CSP (defense-in-depth; header CSP juga disuntik dari main.js) -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file:; media-src 'self' blob: file:; font-src 'self' data:; connect-src 'self' http://localhost:* http://127.0.0.1:* https:; base-uri 'none'; form-action 'none'; object-src 'none'" />
+  <title>Keylox — AI Video Editor</title>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/main.tsx"></script>
+</body>
+</html>

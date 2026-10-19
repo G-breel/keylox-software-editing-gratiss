@@ -1,0 +1,7 @@
+.env
+node_modules/
+build/
+.gradle/
+*.apk
+*.xapk
+docs/superapp/*.tmp

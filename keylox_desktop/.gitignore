@@ -1,0 +1,15 @@
+node_modules/
+dist/
+out/
+.env
+.env.*
+!.env.example
+*.log
+
+# Stage 7 (QE): generated test artifacts and heavy media fixtures.
+# Fixtures are reproduced by tests/fixtures/generate.ps1, never committed.
+tests/fixtures/media/
+tests/e2e/test-results/
+tests/e2e/playwright-report/
+test-results/
+playwright-report/
