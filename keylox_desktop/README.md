@@ -10,9 +10,10 @@ Desktop video editor (Electron) seperti CapCut, dengan AI control via Gemini.
 - Filter: brightness/contrast/saturation/hue/blur/sharpen, B&W, sepia, vivid, chroma key
 - Text overlay (multi, timing, size, color, posisi)
 - Audio: fade in/out, remove, mute
-- AI command box (rule-based + Gemini natural language)
-- Export MP4/WebM/MOV (native FFmpeg) dengan progress bar
-- Settings: Gemini API key
+- Transisi antar-klip (crossfade/fade-black/slide)
+- AI command box (rule-based + multi-provider natural language)
+- Export MP4/WebM/MOV (native FFmpeg) dengan progress bar, termasuk multi-clip timeline
+- Settings: BYOK multi-provider + privasi-by-design
 
 ## Setup & Run (dev)
 ```bash
@@ -49,10 +50,12 @@ Output: `release/Keylox-1.0.0-win-x64.exe` (NSIS installer) + `release/Keylox-1.
 - Untuk fitur lanjutan (tracking, MediaPipe, keyframe, 17 shader effects), lihat project Android skeleton (`android_video_editor/`) dan spec pipeline (`keylox/docs/superapp/00-spec.md`)
 
 ## Roadmap
+- [x] Multi-clip timeline & export
+- [x] Transisi antar-klip
+- [x] BYOK multi-provider + privasi
 - [ ] Tracking (MediaPipe desktop bindings)
 - [ ] 17 shader effects (WebGL/OpenGL)
 - [ ] Keyframe animation
-- [ ] Multi-clip timeline
 - [ ] Subtitle/caption burn-in
 - [ ] Template system
-- [ ] Auto-cut / auto-subtitle (Gemini video understanding)
+- [ ] Auto-cut / auto-subtitle (AI video understanding)

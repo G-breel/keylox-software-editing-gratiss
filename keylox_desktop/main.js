@@ -574,6 +574,30 @@ handle('ffmpeg:thumbnail', async (_event, filePath, timeSec) => {
  * IPC: Media - waveform (M2-B / DoU U5)
  * ------------------------------------------------------------------ */
 
+secretHandle('ai:autoCaption', async (_event, input) => {
+  const payload = input && typeof input === 'object' ? input : {};
+  const durationSec = typeof payload.durationSec === 'number' && payload.durationSec > 0 ? payload.durationSec : (typeof payload.durationMs === 'number' ? payload.durationMs / 1000 : 10);
+  const durationMs = Math.round(durationSec * 1000);
+  const step = 3000;
+  const captions = [];
+  for (let t = 0; t < durationMs; t += step) {
+    captions.push({ start: t, end: Math.min(t + step, durationMs), text: `[caption mock #${captions.length + 1}]` });
+  }
+  return { captions };
+});
+
+secretHandle('ai:sceneDetect', async (_event, input) => {
+  const payload = input && typeof input === 'object' ? input : {};
+  const durationSec = typeof payload.durationSec === 'number' && payload.durationSec > 0 ? payload.durationSec : (typeof payload.durationMs === 'number' ? payload.durationMs / 1000 : 10);
+  const durationMs = Math.round(durationSec * 1000);
+  const step = 5000;
+  const scenes = [];
+  for (let t = 0; t < durationMs; t += step) {
+    scenes.push({ start: t, end: Math.min(t + step, durationMs), thumbnail: null });
+  }
+  return { scenes };
+});
+
 handle('ffmpeg:waveform', async (_event, filePath) => {
   const resolved = safeMediaFile(filePath);
   if (!resolved) return { error: 'Path media tidak valid atau tidak diizinkan.' };

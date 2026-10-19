@@ -60,6 +60,8 @@ const INVOKE_CHANNELS = Object.freeze({
   'ai:invoke': true,
   'ai:autoCaption': true,
   'ai:sceneDetect': true,
+  'ai:autoCaption': true,
+  'ai:sceneDetect': true,
   // §2.12.7 — onboarding "Dapatkan API Key Gratis" [BARU v1.2]
   'shell:openExternal': true,
   // §2.16 — transparansi token/biaya [BARU v1.2]
