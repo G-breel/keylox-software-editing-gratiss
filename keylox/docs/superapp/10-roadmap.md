@@ -27,16 +27,16 @@ punya tempat berpijak. Menguji AI lebih awal = menguji di atas fondasi yang masi
 
 Aplikasi dianggap **bisa dipakai normal** bila 8 hal ini bekerja tanpa AI:
 
-| # | Kemampuan | Kriteria lulus |
-|---|---|---|
-| U1 | Impor media | Video/audio/gambar masuk, thumbnail muncul, durasi terbaca |
-| U2 | Timeline | Drag-move, trim handle, split, delete, multi-track, snap, zoom |
-| U3 | Preview | Play/pause/seek akurat; perubahan langsung terlihat |
-| U4 | Teks & caption manual | Tambah/ubah/geser teks; caption manual tanpa AI |
-| U5 | Audio | Volume, mute, fade in/out, waveform terlihat |
-| U6 | Export | MP4 H.264 keluar benar (durasi, resolusi, audio sync) |
-| U7 | Undo/redo | Andal, termasuk 1 perintah = 1 langkah undo |
-| U8 | Proyek | Simpan/buka `.keylox`, media ter-relink |
+| # | Kemampuan | Status | Kriteria lulus |
+|---|---|---|---|
+| U1 | Impor media | ✅ | Video/audio/gambar masuk, thumbnail muncul, durasi terbaca |
+| U2 | Timeline | ✅ | Drag-move, trim handle, split, delete, multi-track, snap, zoom |
+| U3 | Preview | ✅ | Play/pause/seek akurat; perubahan langsung terlihat |
+| U4 | Teks & caption manual | 🟡 dasar | Tambah/ubah/geser teks; caption manual tanpa AI |
+| U5 | Audio | ✅ | Volume, mute, fade in/out, waveform terlihat |
+| U6 | Export | 🟡 dasar | MP4 H.264 keluar benar (durasi, resolusi, audio sync) — multi-clip module siap, belum di-wire |
+| U7 | Undo/redo | ✅ | Andal, termasuk 1 perintah = 1 langkah undo |
+| U8 | Proyek | ✅ | Simpan/buka `.keylox`, media ter-relink |
 
 > Selama U1–U8 belum lulus, **jangan** mengejar fitur baru.
 
