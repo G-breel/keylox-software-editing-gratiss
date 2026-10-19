@@ -32,7 +32,7 @@ Aplikasi dianggap **bisa dipakai normal** bila 8 hal ini bekerja tanpa AI:
 | U1 | Impor media | ✅ | Video/audio/gambar masuk, thumbnail muncul, durasi terbaca |
 | U2 | Timeline | ✅ | Drag-move, trim handle, split, delete, multi-track, snap, zoom |
 | U3 | Preview | ✅ | Play/pause/seek akurat; perubahan langsung terlihat |
-| U4 | Teks & caption manual | 🟡 dasar | Tambah/ubah/geser teks; caption manual tanpa AI |
+| U4 | Teks & caption manual | ✅ | Tambah/ubah/geser teks; caption manual tanpa AI |
 | U5 | Audio | ✅ | Volume, mute, fade in/out, waveform terlihat |
 | U6 | Export | 🟡 dasar | MP4 H.264 keluar benar (durasi, resolusi, audio sync) — multi-clip module siap, belum di-wire |
 | U7 | Undo/redo | ✅ | Andal, termasuk 1 perintah = 1 langkah undo |

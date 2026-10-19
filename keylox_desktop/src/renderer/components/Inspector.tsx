@@ -143,6 +143,12 @@ export const Inspector: React.FC<{ onExport: () => void }> = ({ onExport }) => {
                   <input type="color" value={o.color} onChange={(e) => update({ textOverlays: clip.textOverlays.map((t) => (t.id === o.id ? { ...t, color: e.target.value } : t)) })} />
                   <button className="px-1 bg-danger text-white text-xs rounded" onClick={() => update({ textOverlays: clip.textOverlays.filter((t) => t.id !== o.id) })}>✕</button>
                 </div>
+                <div className="flex items-center gap-2 text-[11px] text-textMuted">
+                  <span>X</span>
+                  <input type="range" min={0} max={100} value={o.x} onChange={(e) => update({ textOverlays: clip.textOverlays.map((t) => (t.id === o.id ? { ...t, x: +e.target.value } : t)) })} className="flex-1" />
+                  <span>Y</span>
+                  <input type="range" min={0} max={100} value={o.y} onChange={(e) => update({ textOverlays: clip.textOverlays.map((t) => (t.id === o.id ? { ...t, y: +e.target.value } : t)) })} className="flex-1" />
+                </div>
               </div>
             ))}
           </div>
