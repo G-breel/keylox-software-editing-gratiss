@@ -35,6 +35,19 @@ function parseOrigins(raw) {
     .filter(Boolean);
 }
 
+/** §3.5 — TTL cache maksimum (5 menit). Perubahan perilaku v1.2 (dulu 30 hari). */
+const CACHE_TTL_MS_MAX = 300000;
+
+/**
+ * §3.5 (v1.2) — TTL cache TIDAK pernah melebihi 5 menit, berapa pun nilai env.
+ * `CACHE_TTL_MS` tetap dihormati untuk nilai yang lebih kecil (mis. tes expiry).
+ */
+function resolveCacheTtlMs() {
+  const raw = Number(process.env.CACHE_TTL_MS || CACHE_TTL_MS_MAX);
+  const value = Number.isFinite(raw) && raw > 0 ? raw : CACHE_TTL_MS_MAX;
+  return Math.min(value, CACHE_TTL_MS_MAX);
+}
+
 const config = {
   port: Number(process.env.PORT || 8787),
   host: process.env.HOST || '127.0.0.1',
@@ -50,7 +63,8 @@ const config = {
   rateLimitWindowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 60000),
   authRateLimitMax: Number(process.env.AUTH_RATE_LIMIT_MAX || 10),
   dailyQuota: Number(process.env.DAILY_QUOTA || 1000),
-  cacheTtlMs: Number(process.env.CACHE_TTL_MS || 2592000000),
+  cacheTtlMs: resolveCacheTtlMs(),
+  cacheTtlMsMax: CACHE_TTL_MS_MAX,
   cacheMaxEntries: Number(process.env.CACHE_MAX_ENTRIES || 5000),
   redisUrl: process.env.REDIS_URL || '',
   telemetryEnabled: process.env.TELEMETRY_ENABLED === 'true',

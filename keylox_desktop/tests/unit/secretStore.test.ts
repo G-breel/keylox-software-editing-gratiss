@@ -122,7 +122,8 @@ describe('settings:setSecret / hasSecret (§2.12.1–§2.12.2)', () => {
   it('menolak provider tak dikenal → ERR_PROVIDER_UNSUPPORTED', () => {
     const store = makeStore();
     try {
-      store.setSecret({ provider: 'anthropic', apiKey: FAKE_OPENAI_KEY });
+      // `cohere` bukan salah satu dari 13 provider registry (§2.13.1).
+      store.setSecret({ provider: 'cohere', apiKey: FAKE_OPENAI_KEY });
       throw new Error('seharusnya menolak');
     } catch (error: any) {
       expect(errorsModule.toErrorShape(error).code).toBe('ERR_PROVIDER_UNSUPPORTED');

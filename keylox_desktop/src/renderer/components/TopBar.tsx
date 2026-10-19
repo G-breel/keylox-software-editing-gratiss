@@ -17,7 +17,7 @@ export const TopBar: React.FC<{ onOpenFiles: () => void; onOpenFolder: () => voi
       <button className="px-2 py-1 bg-elevated text-textPrimary rounded text-xs disabled:opacity-40" disabled={!store.canRedo()} onClick={() => store.redo()}>Redo</button>
       <span className="font-mono text-xs text-textMuted mx-2">00:00:00:00</span>
       <button className="px-3 py-1 bg-active text-white rounded text-xs font-semibold" onClick={onExport}>Export</button>
-      <button className="px-2 py-1 bg-elevated text-textPrimary rounded text-xs" onClick={onSettings}>⚙</button>
+      <button className="px-2 py-1 bg-elevated text-textPrimary rounded text-xs hover:bg-panel" onClick={onSettings}>Settings</button>
     </div>
   );
 };

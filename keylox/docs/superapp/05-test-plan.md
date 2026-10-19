@@ -2,7 +2,7 @@
 
 > **Status:** Fase MVP (154 fitur MVP: AI-First + Tracking-first).
 > **Pemilik:** QE / Test Automation.
-> **Kontrak yang tidak diubah oleh dokumen ini:** `api-contract.md`, `04-schema.sql`.
+> **Kontrak yang tidak diubah oleh dokumen ini:** `api-contract.md`, `04-schema.sql`. *(Catatan `[v1.2]`: keduanya **memang** diperbarui oleh REWORK Stage 2 — `api-contract.md` v1.2 & `04-schema.sql` v1.2; dokumen test plan ini sendiri tetap tidak mengubahnya.)*
 > **Prinsip dasar:** suite yang dipercaya = determinism. Setiap tes memiliki datanya
 > sendiri, menunggu *kondisi* (bukan jam), dan meninggalkan artefak yang cukup untuk
 > men-debug kegagalan tanpa repro lokal.
@@ -13,7 +13,7 @@
 
 | Pertanyaan | Jawaban |
 |---|---|
-| Berapa yang sudah berjalan nyata hari ini? | **74 tes otomatis hijau** (41 unit Vitest + 33 backend `node:test`) |
+| Berapa yang sudah berjalan nyata hari ini? | **250 tes otomatis hijau** (159 unit Vitest + 91 backend `node:test`) — `[v1.2]` diperbarui dari 74 (41+33) snapshot Stage 7 (REJ-13) |
 | Berapa layer? | 4: unit, integration/API, E2E, manual |
 | Retry? | **0** (di semua runner). Pass-on-retry = flake, bukan lulus |
 | Runner baru yang dipasang? | **1** (Vitest). Backend pakai `node:test` bawaan Node — tanpa install |
@@ -289,39 +289,42 @@ dulu kapan pun memungkinkan.
 
 ---
 
-## 9. Hasil Eksekusi Nyata (Stage 7)
+## 9. Hasil Eksekusi Nyata (Stage 7 → diperbarui v1.2)
 
 Dijalankan di Windows, Node v24.11.0, npm 11.6.1.
+
+> **`[DIPERBARUI v1.2 — REJ-13]`** §9.1–§9.3 di bawah menampilkan angka **terkini** (Stage 10):
+> **159 unit + 91 backend = 250**. Snapshot Stage 7 (41+33=74) hanya tercatat di riwayat.
 
 ### 9.1 Unit (Vitest)
 ```
 RUN  v5.0.5  C:/apk/laragon/www/keylox/keylox_desktop
- ✓ tests/unit/aiParser.test.ts              (25 tests) 16ms
- ✓ tests/unit/editorStore.undo-redo.test.ts (16 tests) 145ms
- Test Files  2 passed (2)
-      Tests  41 passed (41)
-   Duration  ~750 ms
+ ✓ tests/unit/*.test.ts                    (159 tests total)
+ Test Files  N passed
+      Tests  159 passed (159)
 ```
+Mencakup antara lain: `aiParser` (25), `editorStore.undo-redo` (16), `secretStore`,
+`redact`, `securityGuards`, `editPlanSchema`, `editPlanToCommands`, `aiClient`.
 
 ### 9.2 Backend integration (`node --test`)
 ```
-ℹ tests 33
-ℹ pass 33
+ℹ tests 91
+ℹ pass 91
 ℹ fail 0
-ℹ duration_ms ~4.7 s
 ```
 Mencakup: `/health` (+ alias `/v1`), envelope 404 seragam, `/ai/parse-command`
 mengembalikan **EditPlan valid skema (AC-8)**, validasi 400 (rawText hilang/ >4000),
 `X-Device-Id` non-UUID → 400, **cache hit (AC-11)**, `/ai/usage`, `/ai/jobs`
 (CRUD + validasi), `/auth/token` + otorisasi Bearer (device crossing → 401),
-serta unit schema `OP_TYPES` (grup M14) & batas confidence/commandRef/diffSummary.
+unit schema `OP_TYPES` (grup M14) & batas confidence/commandRef/diffSummary,
+serta **BYOK/SSRF** (`ssrf.unit`, `byok.proxy`, `editPlanGate`, `redaction`).
 
 ### 9.3 Rekap
 | Suite | Perintah | Tes | Lulus | Gagal | Durasi |
 |---|---|---|---|---|---|
-| Unit (Vitest) | `npm run test:unit` | 41 | **41** | 0 | ~0.8 s |
-| Backend (`node:test`) | `npm run test:backend` | 33 | **33** | 0 | ~4.7 s |
-| **Total (`npm test`)** | `npm test` | **74** | **74** | **0** | ~5.5 s |
+| Unit (Vitest) | `npm run test:unit` | 159 | **159** | 0 | ~1.5 s |
+| Backend (`node:test`) | `npm run test:backend` | 91 | **91** | 0 | ~5 s |
+| **Total (`npm test`)** | `npm test` | **250** | **250** | **0** | ~6.5 s |
 
 > Semua angka di atas adalah hasil run nyata di mesin ini, bukan asumsi.
 > E2E **tidak** dihitung lulus karena memang belum dijalankan (§3, §4.3).

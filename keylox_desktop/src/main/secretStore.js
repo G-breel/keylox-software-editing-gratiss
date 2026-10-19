@@ -3,10 +3,14 @@
 /**
  * Penyimpanan rahasia BYOK (main process saja).
  *
- * Sumber: `api-contract.md` v1.1 §2.12 (invarian #2: key hanya dibaca/ditulis di
+ * Sumber: `api-contract.md` v1.2 §2.12 (invarian #2: key hanya dibaca/ditulis di
  * main via `safeStorage` → `app.getPath('userData')/secure/settings.enc`),
- * `byok-api-key.md` §3 (format JSON terenkripsi `{ provider, apiKey, model, baseUrl }`),
- * §6.2 (`{ backendBaseUrl, userToken, deviceId, provider, apiKey, model, baseUrl }`).
+ * `byok-api-key.md` §3 (format JSON terenkripsi), `privacy-data.md` §3.1.
+ *
+ * v1.2 (R1.2 — ADR-03): key disimpan **per provider** (`providers: {id: {apiKey,
+ * model, baseUrl}}`) sehingga berganti provider tidak menghapus key provider lain.
+ * Migrasi otomatis dari bentuk v1.1 (satu key di level atas) → v1.2 saat dibaca.
+ * `hasSecret(provider)` tetap `{hasKey, masked, model}` (+`error` aditif saat gagal).
  *
  * Modul murni Node + DI (`safeStorage` disuntik) sehingga bisa diuji unit tanpa
  * Electron. TIDAK ADA nilai key yang pernah dituliskan ke log.
@@ -21,6 +25,7 @@ const crypto = require('crypto');
 const { KeyloxError } = require('./errors');
 const { maskSecret, createLogger } = require('./redact');
 const {
+  PROVIDERS: PROVIDER_RECORDS,
   validateProvider,
   validateApiKey,
   validateProviderBaseUrl,
@@ -28,7 +33,7 @@ const {
   resolveModel,
 } = require('./providerPolicy');
 
-const STORE_VERSION = 1;
+const STORE_VERSION = 2;
 const SECURE_DIR_NAME = 'secure';
 const SECURE_FILE_NAME = 'settings.enc';
 const MAX_PREF_VALUE_LEN = 2048;
@@ -36,6 +41,12 @@ const MAX_PREF_VALUE_LEN = 2048;
 // Nama field preference non-rahasia yang boleh lewat settings:get/set (§2.7).
 const ALLOWED_PREF_KEYS = Object.freeze(['backendBaseUrl', 'mode', 'provider', 'model', 'deviceId']);
 
+/**
+ * State kosong. `providers` = peta key PER PROVIDER (v1.2 §2.13 — ADR-03):
+ * `{ [id]: { apiKey, model, baseUrl } }`. Field `provider/apiKey/model/baseUrl`
+ * di level atas dipertahankan sebagai **cermin provider aktif** demi kompatibilitas
+ * v1.1 (`getRuntimeConfig` masih dipakai `aiClient` mode lama).
+ */
 function emptyState() {
   return {
     version: STORE_VERSION,
@@ -44,6 +55,7 @@ function emptyState() {
     apiKey: null,
     model: null,
     baseUrl: null,
+    providers: {},
     backendBaseUrl: '',
     mode: 'direct',
     deviceId: null,
@@ -51,15 +63,54 @@ function emptyState() {
   };
 }
 
+/** Bentuk satu entri provider; `null` bila tidak ada key yang bisa dipakai. */
+function sanitizeProviderEntry(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  return {
+    apiKey: typeof entry.apiKey === 'string' && entry.apiKey ? entry.apiKey : null,
+    model: entry.model !== null && entry.model !== undefined ? String(entry.model) : null,
+    baseUrl: typeof entry.baseUrl === 'string' && entry.baseUrl ? entry.baseUrl : null,
+  };
+}
+
+function sanitizeProviders(raw) {
+  const out = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const id of Object.keys(raw)) {
+    const entry = sanitizeProviderEntry(raw[id]);
+    if (entry) out[id] = entry;
+  }
+  return out;
+}
+
+/** Selaraskan cermin provider aktif dari `providers` (satu arah, selalu dipanggil). */
+function syncMirror(state) {
+  const entry = state.provider ? state.providers[state.provider] : null;
+  state.apiKey = entry ? entry.apiKey : null;
+  state.model = entry ? entry.model : null;
+  state.baseUrl = entry ? entry.baseUrl : null;
+}
+
+/** Salinan dalam `providers` — mencegah pemanggil memutasi cache internal store. */
+function cloneProviders(providers) {
+  const out = {};
+  for (const [id, entry] of Object.entries(providers || {})) out[id] = { ...entry };
+  return out;
+}
+
 function normalizeState(raw) {
   const base = emptyState();
   if (!raw || typeof raw !== 'object') return base;
   const state = { ...base, ...raw };
   state.prefs = raw.prefs && typeof raw.prefs === 'object' ? { ...raw.prefs } : {};
-  if (state.apiKey !== null && typeof state.apiKey !== 'string') state.apiKey = null;
-  if (state.provider !== null) state.provider = String(state.provider);
-  if (state.model !== null) state.model = String(state.model);
-  if (state.baseUrl !== null) state.baseUrl = String(state.baseUrl);
+  state.providers = sanitizeProviders(raw.providers);
+  state.provider = raw.provider === null || raw.provider === undefined ? null : String(raw.provider);
+  // Migrasi v1.1 → v1.2: satu key di level atas dipindah ke `providers[provider]`.
+  if (state.provider && typeof raw.apiKey === 'string' && raw.apiKey && !state.providers[state.provider]) {
+    const migrated = sanitizeProviderEntry({ apiKey: raw.apiKey, model: raw.model, baseUrl: raw.baseUrl });
+    if (migrated) state.providers[state.provider] = migrated;
+  }
+  syncMirror(state);
   state.backendBaseUrl = typeof state.backendBaseUrl === 'string' ? state.backendBaseUrl : '';
   state.mode = state.backendBaseUrl ? 'proxy' : 'direct';
   return state;
@@ -162,7 +213,10 @@ function createSecretStore(deps) {
     return next;
   }
 
-  /** State runtime untuk main process (memuat key!). JANGAN kirim ke renderer. */
+  /**
+   * State runtime untuk main process (memuat key!). JANGAN kirim ke renderer.
+   * Bentuk v1.2: `providers` = key per provider; field atas = cermin provider aktif.
+   */
   function getRuntimeConfig() {
     const state = readState();
     return {
@@ -170,6 +224,7 @@ function createSecretStore(deps) {
       apiKey: state.apiKey,
       model: state.model,
       baseUrl: state.baseUrl,
+      providers: cloneProviders(state.providers),
       backendBaseUrl: state.backendBaseUrl,
       mode: state.backendBaseUrl ? 'proxy' : 'direct',
       deviceId: state.deviceId || null,
@@ -188,11 +243,15 @@ function createSecretStore(deps) {
       }
       throw error;
     }
-    const hasKey = Boolean(state.apiKey) && state.provider === provider;
+    const entry = state.providers[provider] || null;
+    const record = PROVIDER_RECORDS[provider] || null;
+    // Provider lokal (`ollama`/`lmstudio`) sah tanpa key: entri tersimpan = siap pakai (§2.13.2).
+    const keyOptional = Boolean(record && record.isLocal);
+    const hasKey = keyOptional ? Boolean(entry) : Boolean(entry && entry.apiKey);
     return {
       hasKey,
-      masked: hasKey ? maskSecret(state.apiKey) : null,
-      model: hasKey ? state.model || null : null,
+      masked: entry && entry.apiKey ? maskSecret(entry.apiKey) : null,
+      model: hasKey ? entry.model || null : null,
     };
   }
 
@@ -205,27 +264,44 @@ function createSecretStore(deps) {
     const baseUrl = validateProviderBaseUrl(provider, payload.baseUrl, { allowLocalhostDev });
 
     const state = readState();
+    state.providers[provider] = { apiKey: apiKey || null, model, baseUrl: baseUrl || null };
     state.provider = provider;
-    state.apiKey = apiKey;
-    state.model = model;
-    state.baseUrl = baseUrl;
+    syncMirror(state);
     writeState(state);
 
-    return { ok: true, hasKey: true, masked: maskSecret(apiKey), model, provider };
+    return { ok: true, hasKey: true, masked: apiKey ? maskSecret(apiKey) : null, model, provider };
   }
 
-  /** §2.12.3 — timpa dengan state kosong; berkas & safeStorage tetap ada. */
+  /** §2.12.3 — hapus key provider terkait; berkas & safeStorage tetap ada. */
   function clearSecret(provider) {
     validateProvider(provider);
     const state = readState();
-    if (state.apiKey) {
-      state.provider = provider;
-      state.apiKey = null;
-      state.model = null;
-      state.baseUrl = null;
-    }
+    if (state.providers[provider]) delete state.providers[provider];
+    syncMirror(state);
     writeState(state);
     return { ok: true };
+  }
+
+  /**
+   * Ringkasan SEMUA provider tersimpan — `masked` saja, TIDAK pernah key utuh.
+   * Dipakai panel Settings & `data:exportLocal` (§2.15.4) yang default tanpa rahasia.
+   */
+  function listSecrets() {
+    let state;
+    try {
+      state = readState();
+    } catch {
+      return [];
+    }
+    return Object.keys(state.providers).sort().map((id) => {
+      const entry = state.providers[id];
+      return {
+        provider: id,
+        hasKey: Boolean(entry.apiKey),
+        masked: entry.apiKey ? maskSecret(entry.apiKey) : null,
+        model: entry.model || null,
+      };
+    });
   }
 
   /* ---------------- Preferences non-rahasia (§2.7) ---------------- */
@@ -290,6 +366,13 @@ function createSecretStore(deps) {
       } else {
         throw new KeyloxError('ERR_VALIDATION_PAYLOAD', "Mode harus 'direct' atau 'proxy'.");
       }
+    } else if (key === 'provider') {
+      state.provider = typeof value === 'string' ? value : null;
+      syncMirror(state);
+    } else if (key === 'model') {
+      // Model aktif hidup di dalam entri provider (v1.2); fallback v1.1 bila belum ada entri.
+      if (state.provider && state.providers[state.provider]) state.providers[state.provider].model = value === null ? null : String(value);
+      else state.model = value;
     } else if (ALLOWED_PREF_KEYS.includes(key)) {
       state[key] = value;
     } else {
@@ -305,6 +388,7 @@ function createSecretStore(deps) {
     isStorageAvailable: storageAvailable,
     getRuntimeConfig,
     hasSecret,
+    listSecrets,
     setSecret,
     clearSecret,
     getPreference,
@@ -338,6 +422,8 @@ module.exports = {
   defaultSecureFilePath,
   emptyState,
   normalizeState,
+  sanitizeProviders,
+  cloneProviders,
   isSecretKeyName,
   STORE_VERSION,
   SECURE_DIR_NAME,

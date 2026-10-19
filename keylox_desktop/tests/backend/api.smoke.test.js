@@ -123,11 +123,13 @@ test('POST /ai/parse-command rejects a non-UUID X-Device-Id (400)', async () => 
 });
 
 test('identical input is served from cache on the second call (AC-11)', async () => {
+  // §3.5 (v1.2): cache hanya untuk jobType STRUKTURAL. `scene_detect` termasuk
+  // `CACHEABLE_JOB_TYPES`; `parse_command` (berkonten) TIDAK pernah di-cache.
   const unique = 'qe-cache-probe-' + Date.now();
-  const body = { rawText: unique, inputMode: 'text', language: 'auto', context: {} };
+  const body = { prompt: unique };
 
-  const first = await request('POST', '/ai/parse-command', { headers: { 'x-device-id': DEVICE_A }, body });
-  const second = await request('POST', '/ai/parse-command', { headers: { 'x-device-id': DEVICE_A }, body });
+  const first = await request('POST', '/ai/scene-detect', { headers: { 'x-device-id': DEVICE_A }, body });
+  const second = await request('POST', '/ai/scene-detect', { headers: { 'x-device-id': DEVICE_A }, body });
 
   assert.equal(first.status, 200);
   assert.equal(second.status, 200);

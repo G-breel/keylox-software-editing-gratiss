@@ -1,50 +1,149 @@
 'use strict';
 
 /**
- * Registry provider + allowlist host + pertahanan anti-SSRF.
+ * Registry provider + allowlist host + pertahanan anti-SSRF (BACKEND).
  *
- * Sumber aturan: `api-contract.md` §3.7 butir 3 & `06-security.md` §5.3.
+ * Sumber aturan: `api-contract.md` v1.2 §2.13 (registry 13 provider, ADR-03),
+ * §3.7 butir 3 (`X-Provider` enum registry, `X-Provider-Base-Url` hanya untuk
+ * `custom`/lokal), `06-security.md` §5.3.
+ *
+ * Salinan tersinkron dari `src/shared/providerRegistry.js` (backend tidak
+ * `require()` lintas-paket). Paritas `id`, `hosts`, `defaultModel`, `keyPattern`,
+ * dan `pricePer1M` dijaga `tests/backend/cachePolicy.unit.test.js`.
  *
  * Kontrak perilaku:
- *  - `X-Provider` hanya menerima provider yang ada di registry DAN didukung.
- *    `openai` terdaftar tetapi `supported:false` → `ERR_PROVIDER_UNSUPPORTED` (400).
- *  - `X-Provider-Base-Url` dari klien TIDAK PERNAH dipercaya apa adanya:
- *    skema harus HTTPS (kecuali localhost dev eksplisit), host harus ada di
- *    allowlist provider, port harus default, tanpa kredensial di URL, dan host
- *    tidak boleh berada di rentang privat/link-local/cloud-metadata.
+ *  - `X-Provider` menerima **enum id registry** (13). Di luar itu →
+ *    `ERR_PROVIDER_UNSUPPORTED` (400).
+ *  - `X-Provider-Base-Url` dari klien TIDAK PERNAH dipercaya apa adanya: skema
+ *    harus HTTPS (kecuali localhost dev eksplisit), tanpa kredensial, host tidak
+ *    boleh di rentang privat/link-local/cloud-metadata, dan untuk provider
+ *    registry host WAJIB ada di allowlist + port default + tanpa path.
+ *    Untuk `custom`/lokal, host/port bebas (divalidasi anti-SSRF saja).
  *  - Semua penolakan hanya memuat KONSTANTA alasan (`reason`) — tidak pernah nilai
- *    header mentah, agar tidak ada pantulan key/host ke respons (`SEC-ERR-01`).
+ *    header mentah (`SEC-ERR-01`).
  */
 
 const net = require('node:net');
 const config = require('../config');
 const { makeError, ErrorCodes } = require('../errors');
 
+// Format key per provider (`api-contract.md` §2.12.1). Regex-literal sengaja:
+// tidak ada nilai key yang muncul di source.
+const GEMINI_KEY_RES = Object.freeze([/^AIza[0-9A-Za-z_-]{35}$/, /^AQ\.[A-Za-z0-9_-]{25,}$/]);
+const OPENAI_KEY_RE = /^sk-[A-Za-z0-9-]{20,}$/;
+const ANTHROPIC_KEY_RE = /^sk-ant-[A-Za-z0-9_-]{20,}$/;
+const OPENROUTER_KEY_RE = /^sk-or-[A-Za-z0-9-]{20,}$/;
+const GROQ_KEY_RE = /^gsk_[A-Za-z0-9]{20,}$/;
+const DEEPSEEK_KEY_RE = /^sk-[A-Za-z0-9]{20,}$/;
+const MISTRAL_KEY_RE = /^[A-Za-z0-9]{32}$/;
+const XAI_KEY_RE = /^xai-[A-Za-z0-9]{20,}$/;
+const TOGETHER_KEY_RE = /^[A-Za-z0-9_-]{20,}$/;
+const CEREBRAS_KEY_RE = /^csk-[A-Za-z0-9]{20,}$/;
+
+const KEY_MIN_LEN = 8;
+const KEY_MAX_LEN = 512;
+
+/**
+ * 13 provider (§2.13.1). `clientBaseUrl: true` = `baseUrl` boleh ditentukan klien
+ * (`custom` + lokal) → §3.7 butir 3. `pricePer1M` = harga indikatif (estimasi biaya).
+ */
 const PROVIDERS = Object.freeze({
   gemini: Object.freeze({
-    id: 'gemini',
-    supported: true,
+    id: 'gemini', supported: true, clientBaseUrl: false,
     hosts: Object.freeze(['generativelanguage.googleapis.com']),
     defaultModel: 'gemini-2.5-flash',
+    keyPatterns: GEMINI_KEY_RES,
+    pricePer1M: Object.freeze({ in: 0.3, out: 2.5 }),
   }),
-  // Terdaftar untuk kontrak (allowlist host sudah final) tetapi belum didukung backend.
   openai: Object.freeze({
-    id: 'openai',
-    supported: false,
+    id: 'openai', supported: true, clientBaseUrl: false,
     hosts: Object.freeze(['api.openai.com']),
     defaultModel: 'gpt-4o-mini',
+    keyPatterns: Object.freeze([OPENAI_KEY_RE]),
+    pricePer1M: Object.freeze({ in: 0.15, out: 0.6 }),
+  }),
+  anthropic: Object.freeze({
+    id: 'anthropic', supported: true, clientBaseUrl: false,
+    hosts: Object.freeze(['api.anthropic.com']),
+    defaultModel: 'claude-3-5-haiku-latest',
+    keyPatterns: Object.freeze([ANTHROPIC_KEY_RE]),
+    pricePer1M: Object.freeze({ in: 0.8, out: 4.0 }),
+  }),
+  openrouter: Object.freeze({
+    id: 'openrouter', supported: true, clientBaseUrl: false,
+    hosts: Object.freeze(['openrouter.ai']),
+    defaultModel: 'google/gemini-2.5-flash',
+    keyPatterns: Object.freeze([OPENROUTER_KEY_RE]),
+    pricePer1M: null,
+  }),
+  groq: Object.freeze({
+    id: 'groq', supported: true, clientBaseUrl: false,
+    hosts: Object.freeze(['api.groq.com']),
+    defaultModel: 'llama-3.3-70b-versatile',
+    keyPatterns: Object.freeze([GROQ_KEY_RE]),
+    pricePer1M: Object.freeze({ in: 0.59, out: 0.79 }),
+  }),
+  deepseek: Object.freeze({
+    id: 'deepseek', supported: true, clientBaseUrl: false,
+    hosts: Object.freeze(['api.deepseek.com']),
+    defaultModel: 'deepseek-chat',
+    keyPatterns: Object.freeze([DEEPSEEK_KEY_RE]),
+    pricePer1M: Object.freeze({ in: 0.27, out: 1.1 }),
+  }),
+  mistral: Object.freeze({
+    id: 'mistral', supported: true, clientBaseUrl: false,
+    hosts: Object.freeze(['api.mistral.ai']),
+    defaultModel: 'mistral-small-latest',
+    keyPatterns: Object.freeze([MISTRAL_KEY_RE]),
+    pricePer1M: Object.freeze({ in: 0.2, out: 0.6 }),
+  }),
+  xai: Object.freeze({
+    id: 'xai', supported: true, clientBaseUrl: false,
+    hosts: Object.freeze(['api.x.ai']),
+    defaultModel: 'grok-2-latest',
+    keyPatterns: Object.freeze([XAI_KEY_RE]),
+    pricePer1M: Object.freeze({ in: 2.0, out: 10.0 }),
+  }),
+  together: Object.freeze({
+    id: 'together', supported: true, clientBaseUrl: false,
+    hosts: Object.freeze(['api.together.xyz']),
+    defaultModel: 'meta-llama/Llama-3.3-70B-Instruct-Turbo',
+    keyPatterns: Object.freeze([TOGETHER_KEY_RE]),
+    pricePer1M: Object.freeze({ in: 0.88, out: 0.88 }),
+  }),
+  cerebras: Object.freeze({
+    id: 'cerebras', supported: true, clientBaseUrl: false,
+    hosts: Object.freeze(['api.cerebras.ai']),
+    defaultModel: 'llama3.1-8b',
+    keyPatterns: Object.freeze([CEREBRAS_KEY_RE]),
+    pricePer1M: Object.freeze({ in: 0.1, out: 0.1 }),
+  }),
+  ollama: Object.freeze({
+    id: 'ollama', supported: true, clientBaseUrl: true,
+    hosts: Object.freeze(['localhost']),
+    defaultModel: 'llama3.2',
+    keyPatterns: Object.freeze([]),
+    pricePer1M: Object.freeze({ in: 0, out: 0 }),
+  }),
+  lmstudio: Object.freeze({
+    id: 'lmstudio', supported: true, clientBaseUrl: true,
+    hosts: Object.freeze(['localhost']),
+    defaultModel: 'qwen2.5-7b-instruct',
+    keyPatterns: Object.freeze([]),
+    pricePer1M: Object.freeze({ in: 0, out: 0 }),
+  }),
+  custom: Object.freeze({
+    id: 'custom', supported: true, clientBaseUrl: true,
+    hosts: Object.freeze([]),
+    defaultModel: null,
+    keyPatterns: Object.freeze([]),
+    pricePer1M: null,
   }),
 });
 
-const DEFAULT_PROVIDER = 'gemini';
+const PROVIDER_IDS = Object.freeze(Object.keys(PROVIDERS));
 
-// Format key per provider (`api-contract.md` §2.12.1). Regex-literal sengaja:
-// tidak ada nilai key yang muncul di source.
-const GEMINI_KEY_RE = /^AIza[0-9A-Za-z_-]{35}$/;
-const GEMINI_KEY_AQ_RE = /^AQ\.[A-Za-z0-9_-]{25,}$/;
-const OPENAI_KEY_RE = /^sk-[A-Za-z0-9-]{20,}$/;
-const KEY_MIN_LEN = 8;
-const KEY_MAX_LEN = 512;
+const DEFAULT_PROVIDER = 'gemini';
 
 // Host endpoint metadata cloud / nama internal (SSRF → eskalasi kredensial).
 const METADATA_HOSTS = new Set([
@@ -59,7 +158,9 @@ const METADATA_HOSTS = new Set([
 ]);
 
 function validationError(message, reason, extra = {}) {
-  return makeError(ErrorCodes.VALIDATION_PAYLOAD, message, {
+  // api-contract v1.2 §3.7: pelanggaran `X-Provider-Base-Url` memakai kode
+  // khusus `ERR_PROVIDER_BASE_URL_NOT_ALLOWED` (bukan VALIDATION_PAYLOAD umum).
+  return makeError(ErrorCodes.PROVIDER_BASE_URL_NOT_ALLOWED, message, {
     httpStatus: 400,
     retryable: false,
     details: { reason, ...extra },
@@ -83,8 +184,8 @@ function rawHostOf(rawUrl) {
 function unsupportedProvider(providerId) {
   return makeError(
     ErrorCodes.PROVIDER_UNSUPPORTED,
-    `Provider '${providerId}' belum didukung backend ini. Provider didukung: gemini.`,
-    { httpStatus: 400, retryable: false, details: { provider: providerId } },
+    `Provider '${providerId}' belum didukung backend ini.`,
+    { httpStatus: 400, retryable: false, details: { provider: providerId, supported: PROVIDER_IDS.slice() } },
   );
 }
 
@@ -177,6 +278,7 @@ function resolveProvider(headerValue) {
 /**
  * Validasi format key sebelum dipakai (api-contract §2.12.1). Pesan error TIDAK
  * pernah memuat nilai key, panjangnya, atau potongannya.
+ * Provider tanpa `keyPatterns` (lokal/`custom`) hanya diuji batas panjang.
  */
 function assertProviderKeyFormat(providerId, key) {
   const invalid = (reason) => makeError(
@@ -191,10 +293,9 @@ function assertProviderKeyFormat(providerId, key) {
   if (value.length > KEY_MAX_LEN) throw invalid('too_long');
   if (/\s/.test(value)) throw invalid('contains_whitespace');
 
-  const ok = providerId === 'gemini'
-    ? (GEMINI_KEY_RE.test(value) || GEMINI_KEY_AQ_RE.test(value))
-    : OPENAI_KEY_RE.test(value);
-  if (!ok) throw invalid('format_mismatch');
+  const provider = PROVIDERS[String(providerId || '').trim().toLowerCase()];
+  const patterns = (provider && provider.keyPatterns) || [];
+  if (patterns.length > 0 && !patterns.some((re) => re.test(value))) throw invalid('format_mismatch');
   return value;
 }
 
@@ -202,6 +303,9 @@ function assertProviderKeyFormat(providerId, key) {
  * Validasi `baseUrl` dari klien (opsional). Mengembalikan origin ternormalisasi
  * atau `null` bila header tidak dikirim. Melempar ERR_VALIDATION_PAYLOAD (400)
  * untuk setiap pelanggaran allowlist/anti-SSRF.
+ *
+ * §3.7 butir 3 (v1.2): untuk provider registry host WAJIB ada di allowlist;
+ * untuk `custom`/lokal host/port bebas (tetap diblokir bila privat/metadata).
  */
 function assertBaseUrlAllowed(rawBaseUrl, provider) {
   if (rawBaseUrl === undefined || rawBaseUrl === null || String(rawBaseUrl).trim() === '') return null;
@@ -242,6 +346,10 @@ function assertBaseUrlAllowed(rawBaseUrl, provider) {
   if (blocked) {
     throw validationError('baseUrl menunjuk alamat internal/terlarang.', blocked, { provider: provider.id });
   }
+
+  // Provider `custom`/lokal: host & port ditentukan pengguna (§3.7 butir 3).
+  if (provider.clientBaseUrl) return url.origin;
+
   if (!provider.hosts.includes(host)) {
     throw validationError('Host baseUrl tidak ada di allowlist provider.', 'host_not_allowlisted', { provider: provider.id });
   }
@@ -257,6 +365,7 @@ function assertBaseUrlAllowed(rawBaseUrl, provider) {
 
 module.exports = {
   PROVIDERS,
+  PROVIDER_IDS,
   DEFAULT_PROVIDER,
   METADATA_HOSTS,
   resolveProvider,

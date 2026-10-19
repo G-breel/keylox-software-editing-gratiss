@@ -326,9 +326,12 @@ async function generateVisionJson(prompt, imageBase64, mimeType = 'image/jpeg', 
 async function cachedGenerate(jobType, input, genFn, opts = {}) {
   const fp = opts.keyFingerprint || keyFingerprint(activeKey(opts.reqKey).key);
   const key = cacheKey({ jobType, input, mv: config.geminiModelVersion, kh: fp });
+  // §3.5 (v1.2): hanya jobType struktural yang boleh masuk cache; jobType berkonten
+  // (parse_command/chat/refine/transcribe/ocr/translate/…) SELALU memanggil provider.
+  const cacheable = cache.isCacheableJobType(jobType);
 
-  if (!opts.noCache) {
-    const cached = cache.get(key);
+  if (cacheable && !opts.noCache) {
+    const cached = cache.get(key, jobType);
     if (cached) {
       return { result: cached.result, tokens: cached.tokens || ZERO_TOKENS, cacheHit: true };
     }
@@ -352,7 +355,7 @@ async function cachedGenerate(jobType, input, genFn, opts = {}) {
 
   // Yang disimpan hanya hasil + token. Tidak ada key, tidak ada fingerprint mentah
   // (fingerprint sudah tercampur di dalam hash kunci cache).
-  cache.set(key, { result, tokens });
+  if (cacheable) cache.set(key, { result, tokens }, jobType);
   return { result, tokens, cacheHit: false };
 }
 

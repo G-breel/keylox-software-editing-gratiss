@@ -23,8 +23,14 @@ const {
  * ------------------------------------------------------------------ */
 const { createLogger, installConsoleRedaction } = require('./src/main/redact');
 const { KeyloxError, toErrorShape } = require('./src/main/errors');
-const { createSecretStore, defaultSecureFilePath } = require('./src/main/secretStore');
+const { createSecretStore, defaultSecureFilePath, STORE_VERSION } = require('./src/main/secretStore');
 const { createAiClient } = require('./src/main/aiClient');
+const { createPrivacyService } = require('./src/main/privacyService');
+const { createUsageService } = require('./src/main/usageService');
+const { createExternalLinks } = require('./src/main/externalLinks');
+const { buildExportPayload, writeExportFile } = require('./src/main/localDataExport');
+const { USAGE_RANGES } = require('./src/shared/usage.schema');
+const { DataWipeLocalSchema, DataExportLocalSchema } = require('./src/shared/privacy.schema');
 
 installConsoleRedaction(console);
 const logger = createLogger(console);
@@ -40,6 +46,9 @@ const TEST_MODE = process.env.NODE_ENV === 'test' || process.env.KEYLOX_E2E === 
 
 let secretStore = null;
 let aiClient = null;
+let privacyService = null;
+let usageService = null;
+let externalLinks = null;
 
 function getSecretStore() {
   if (!secretStore) {
@@ -60,12 +69,35 @@ function getSecretStore() {
   return secretStore;
 }
 
+/** §2.15 — mode privasi & konfirmasi (persisten lewat `settings.enc` sampai DB ada). */
+function getPrivacyService() {
+  if (!privacyService) privacyService = createPrivacyService({ store: getSecretStore() });
+  return privacyService;
+}
+
+/** §2.16 — transparansi token/biaya (in-memory di main sampai `ai_usage_records` ada). */
+function getUsageService() {
+  if (!usageService) usageService = createUsageService();
+  return usageService;
+}
+
+/** §2.12.7 — allowlist URL eksternal (https + host `docsUrl` registry). */
+function getExternalLinks() {
+  if (!externalLinks) {
+    externalLinks = createExternalLinks({ openExternal: (url) => shell.openExternal(url) });
+  }
+  return externalLinks;
+}
+
 function getAiClient() {
   if (!aiClient) {
     aiClient = createAiClient({
       getConfig: () => getSecretStore().getRuntimeConfig(),
       logger,
       allowLocalhostDev: process.env.NODE_ENV !== 'production',
+      // Gate privasi (§2.15) & pencatat usage (§2.16) aktif di aplikasi nyata.
+      privacyService: { assertCanInvoke: (provider, options) => getPrivacyService().assertCanInvoke(provider, options) },
+      usageService: { record: (entry) => getUsageService().record(entry) },
     });
   }
   return aiClient;
@@ -418,18 +450,33 @@ secretHandle('settings:clearSecret', async (_event, input) => {
   return result;
 });
 
-/** §2.12.4 — `{ ok, latencyMs, error }`; `ok:false` bukan error IPC. */
+/** §2.12.4 + §2.14 — `settings:testProvider` **v2** (bentuk v1.1 dipertahankan aditif). */
 secretHandle('settings:testProvider', async (_event, input) => {
   const payload = input && typeof input === 'object' ? input : {};
-  const result = await getAiClient().testProvider({ provider: payload.provider });
-  return { ok: result.ok === true, latencyMs: result.latencyMs ?? null, error: result.error || null };
+  const result = await getAiClient().testProvider({
+    provider: payload.provider,
+    ...(typeof payload.model === 'string' && payload.model.trim() ? { model: payload.model.trim() } : {}),
+  });
+  return {
+    ok: result.ok === true,
+    latencyMs: result.latencyMs ?? null,
+    // [v1.2] §2.14 — hasil uji 3 tingkat (aditif; `error` = errors[0] demi kompat v1.1).
+    provider: result.provider ?? null,
+    model: result.model ?? null,
+    capabilities: result.capabilities ?? null,
+    verdict: result.verdict ?? null,
+    privacy: result.privacy ?? null,
+    errors: Array.isArray(result.errors) ? result.errors : [],
+    error: result.error || null,
+  };
 });
 
 /**
  * §2.12.5 — satu-satunya jalur AI.
  * Routing DIRECT/PROXY ditentukan dari Settings di MAIN (§6.4), bukan dari
  * renderer. Output EditPlan divalidasi `EditPlanOutputSchema` sebelum dikembalikan
- * (§3.3 butir 2). Key tidak pernah menyeberang ke renderer.
+ * (§3.3 butir 2). Gate kapabilitas (§2.14.3) & privasi (§2.15) dijalankan di
+ * `aiClient` SEBELUM request menyentuh jaringan. Key tidak pernah menyeberang ke renderer.
  */
 secretHandle('ai:invoke', async (_event, input) => {
   const payload = input && typeof input === 'object' ? input : {};
@@ -443,7 +490,108 @@ secretHandle('ai:invoke', async (_event, input) => {
     tokens: result.tokens,
     cacheHit: result.cacheHit,
     latencyMs: result.latencyMs,
+    // [v1.2] aditif: identitas panggilan (untuk usage/UI badge).
+    provider: result.provider ?? null,
+    model: result.model ?? null,
+    capability: result.capability ?? null,
+    jobType: result.jobType ?? payload.jobType ?? null,
   };
+});
+
+/* ------------------------------------------------------------------ *
+ * IPC v1.2: onboarding, usage, privasi & data (§2.12.7, §2.16, §2.15)
+ * ------------------------------------------------------------------ */
+
+/** §2.12.7 — buka URL onboarding (hanya https + host allowlist). */
+secretHandle('shell:openExternal', async (_event, input) => {
+  const url = typeof input === 'string' ? input : (input && typeof input === 'object' ? input.url : undefined);
+  return getExternalLinks().open(url); // { ok: true }
+});
+
+/** §2.16 — ringkasan penggunaan/biaya; TIDAK pernah menyentuh jaringan. */
+secretHandle('usage:get', async (_event, input) => {
+  const payload = input && typeof input === 'object' ? input : {};
+  if (payload.range !== undefined && !USAGE_RANGES.includes(payload.range)) {
+    throw new KeyloxError('ERR_VALIDATION_PAYLOAD', `range harus salah satu: ${USAGE_RANGES.join(', ')}.`);
+  }
+  return getUsageService().summary({
+    range: payload.range,
+    provider: typeof payload.provider === 'string' ? payload.provider : undefined,
+    model: typeof payload.model === 'string' ? payload.model : undefined,
+  });
+});
+
+/** §2.15.1 — mode privasi aktif (default `standard`). */
+secretHandle('privacy:getMode', async () => ({ mode: getPrivacyService().getMode() }));
+
+/** §2.15.2 — ubah mode; berlaku tanpa restart. */
+secretHandle('privacy:setMode', async (_event, input) => {
+  const payload = input && typeof input === 'object' ? input : {};
+  return getPrivacyService().setMode(payload.mode);
+});
+
+/** §2.15.3 — catat konfirmasi kirim konten ke provider (`once`/`session`/`always`). */
+secretHandle('privacy:confirmExternal', async (_event, input) => getPrivacyService().confirmExternal(input));
+
+/** §2.15.4 — hapus data lokal (cache/usage/keduanya). Tidak pernah menyentuh key. */
+secretHandle('data:wipeLocal', async (_event, input) => {
+  const payload = input && typeof input === 'object' ? input : {};
+  const parsed = DataWipeLocalSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new KeyloxError('ERR_VALIDATION_PAYLOAD', 'Payload data:wipeLocal tidak valid (butuh { scope, confirm: true }).');
+  }
+  const { scope } = parsed.data;
+  const deleted = {};
+  let freedBytes = 0;
+  if (scope === 'usage' || scope === 'all') {
+    const res = getUsageService().wipe();
+    deleted.usage = res.deleted;
+    freedBytes += res.freedBytes;
+  }
+  if (scope === 'cache' || scope === 'all') {
+    // Cache hasil AI hidup di BACKEND (§3.5) — main tidak menyimpan cache konten.
+    deleted.cache = 0;
+  }
+  logger.info(`[privacy] data:wipeLocal scope=${scope}`);
+  return { freedBytes, deleted };
+});
+
+/**
+ * §2.15.5 — ekspor preferensi + ringkasan usage ke berkas JSON pilihan pengguna.
+ * Default TIDAK menyertakan info key; `includeSecrets:true` tetap hanya `masked`.
+ */
+secretHandle('data:exportLocal', async (_event, input) => {
+  const payload = input && typeof input === 'object' ? input : {};
+  const parsed = DataExportLocalSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new KeyloxError('ERR_VALIDATION_PAYLOAD', 'Payload data:exportLocal tidak valid.');
+  }
+  const includeSecrets = parsed.data.includeSecrets === true;
+  const store = getSecretStore();
+  const runtime = store.getRuntimeConfig();
+  const choice = await dialog.showSaveDialog(mainWindow, {
+    title: 'Export data lokal Keylox',
+    defaultPath: `keylox-export-${new Date().toISOString().slice(0, 10)}.json`,
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+  });
+  if (choice.canceled || !choice.filePath) return { filePath: null, size: 0, canceled: true };
+
+  const exportPayload = buildExportPayload({
+    appVersion: app.getVersion ? app.getVersion() : null,
+    settings: {
+      schemaVersion: STORE_VERSION,
+      provider: runtime.provider,
+      model: runtime.model,
+      mode: runtime.mode,
+      backendBaseUrl: runtime.backendBaseUrl,
+      privacyMode: getPrivacyService().getMode(),
+    },
+    secrets: includeSecrets ? store.listSecrets() : null,
+    usage: getUsageService().summary({ range: 'all' }),
+  });
+  const written = writeExportFile({ filePath: choice.filePath, payload: exportPayload, fsImpl: fs });
+  logger.info(`[privacy] data:exportLocal ditulis (size=${written.size})`);
+  return written; // { filePath, size }
 });
 
 /** §2.7 — preferensi NON-rahasia (rahasia ditolak: ERR_VALIDATION_SECRET_IN_PLAIN_SETTING). */

@@ -67,9 +67,9 @@ di CI (lihat §8).
 
 ### 1.3 Di luar lingkup (dinyatakan eksplisit)
 
-- **BYOK belum diimplementasikan** (`byok-api-key.md` §9) → seluruh kontrol
-  penyimpanan key (`safeStorage`, IPC `settings:*`, `ai:invoke`) belum ada.
-  Dirancang di §5.3 & §10 sebagai **syarat rilis**.
+> **`[DIPERBARUI v1.2 — menutup REJ-12]`** Butir BYOK di bawah **tidak lagi benar** dan telah diluruskan: BYOK **sudah diimplementasikan** sejak kontrak v1.1 (`api-contract.md` §2.12) — kontrol penyimpanan key (`safeStorage`, IPC `settings:*`, `ai:invoke`) **ada** di `src/main/secretStore.js`/`aiClient.js`; v1.2 menambahkan registry multi-provider, capability gate, dan privasi (ADR-03/04/05). Lihat §10 dan `api-contract.md` v1.2.
+
+- ~~**BYOK belum diimplementasikan** (`byok-api-key.md` §9) → seluruh kontrol penyimpanan key (`safeStorage`, IPC `settings:*`, `ai:invoke`) belum ada.~~ → **Sudah diterapkan** (v1.1) & diperluas (v1.2). Rancangan §5.3 & §10 kini bertindak sebagai **spesifikasi yang sudah terpenuhi**, bukan syarat rilis masa depan.
 - **Format `.keylox` (import/export) belum ada implementasinya** → risiko zip-slip
   bersifat **desain** (§5.4), bukan kode yang bisa diuji.
 - **DAST / penetration test eksternal**, **SCA/`npm audit`**, **code signing**,
@@ -102,7 +102,7 @@ Aturan deteksi (semua nilai dicetak **ter-mask**, tidak pernah utuh):
 ### 2.2 Hasil
 
 ```
-secret-scan: BERSIH (43 berkas dipindai, 0 temuan).
+secret-scan: BERSIH (55 berkas dipindai, 0 temuan).
 ```
 
 Dijalankan pada: `main.js`, `preload.js`, `index.html`, `src/`, `scripts/`,
@@ -346,7 +346,7 @@ SLA: CRITICAL = 24 jam · HIGH = 72 jam · MEDIUM = 1 minggu · LOW = 1 sprint.
 | SEC-QUOTA-01 | Kuota hanya menghitung request sukses & bisa dilewati rotasi `deviceId` | `backend/src/middleware/auth.js` | CWE-770 | 1 wk | FIXED |
 | SEC-SCAN-01 | Tidak ada gate secret scanning di build/CI | `scripts/secret-scan.mjs`, `package.json` | CWE-798 | 1 wk | FIXED |
 | SEC-THUMB-01 | Nama berkas thumbnail dibentuk dari input tanpa sanitasi | `main.js` | CWE-22 | 1 wk | FIXED |
-| SEC-PROMPT-01 | Output AI tidak divalidasi schema ketat sebelum diterapkan ke timeline | `backend/src/routes/ai.js`, `services/gemini.js` | CWE-1426, LLM01 | 1 wk | **OPEN** (ditangani bersama BYOK) |
+| SEC-PROMPT-01 | Output AI tidak divalidasi schema ketat sebelum diterapkan ke timeline | `backend/src/routes/ai.js`, `services/gemini.js`, `src/shared/editPlan.schema.js` | CWE-1426, LLM01 | 1 wk | **RESOLVED (v1.1 §3.3)** — semua output AI wajib lolos `EditPlanOutputSchema` Zod (2 lapis: backend + main) |
 
 ### 6.4 LOW (7)
 
@@ -544,7 +544,7 @@ Perbaikan (sudah diterapkan):
     (media max 8, base64 max 32MB, teks max 4000 char).
   Pelanggaran → 400 ERR_VALIDATION_PAYLOAD dengan fieldErrors (nama field +
   pesan), tanpa membocorkan struktur internal.
-Verifikasi: 33/33 backend test lulus, termasuk kasus rawText hilang / >4000 char.
+Verifikasi: 91/91 backend test lulus, termasuk kasus rawText hilang / >4000 char.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
@@ -589,11 +589,11 @@ Verifikasi: 33/33 backend test lulus, termasuk kasus rawText hilang / >4000 char
 
 | Pemeriksaan | Perintah / metode | Hasil |
 |---|---|---|
-| Secret scan | `npm run secret-scan` | **BERSIH** — 43 berkas, 0 temuan |
+| Secret scan | `npm run secret-scan` | **BERSIH** — 55 berkas, 0 temuan |
 | Type check | `npx tsc --noEmit` | **exit 0** (0 error) |
 | Build renderer | `npm run build:renderer` | **sukses** (secret-scan + `✓ built in 610ms`, 34 modul) |
-| Unit test | `npm run test:unit` | **54/54 lulus** (`securityGuards` 13, `aiParser` 25, `editorStore` 16) |
-| Backend test | `npm run test:backend` | **33/33 lulus** (`node:test`) |
+| Unit test | `npm run test:unit` | **159/159 lulus** (`securityGuards`, `aiParser`, `editorStore`, `secretStore`, `editPlan*`, `aiClient`, dll) |
+| Backend test | `npm run test:backend` | **91/91 lulus** (`node:test`) |
 | CSP Electron | launch headless + inspeksi console | renderer ter-mount, **`VIOLATIONS []`** |
 | Sandbox Electron | launch dengan `--enable-sandbox` | **aktif**; `window.require` & `window.process` **undefined** |
 
@@ -646,9 +646,10 @@ Verifikasi: 33/33 backend test lulus, termasuk kasus rawText hilang / >4000 char
    yang memblokir merge (secret-scan sudah ada; CI belum ada).
 3. **[Sprint berikut]** Validasi output AI dengan Zod (SEC-PROMPT-01) + regression
    test anti prompt-injection.
-4. **[Sprint berikut]** Saat BYOK diimplementasikan: `safeStorage` + IPC
-   `settings:*`/`ai:invoke`, allowlist host provider, redaksi key di logger,
-   pemindaian key di dalam `.keylox` (§5.3, §5.4, §10).
+4. **[Selesai — BYOK sudah diterapkan (v1.1/v1.2)]** `safeStorage` + IPC
+   `settings:*`/`ai:invoke`, allowlist host provider (kini berbasis registry 13-provider),
+   redaksi key di logger; pemindaian key di dalam `.keylox` tetap backlog saat format diimplementasikan
+   (§5.3, §5.4, §10).
 5. **[Backlog]** `npm audit`/trivy di CI, perbaikan Low (SEC-INFO-01,
    SEC-ERRMSG-01, SEC-SUPPLY-01), allowlist root direktori untuk IPC path.
 
@@ -656,9 +657,7 @@ Verifikasi: 33/33 backend test lulus, termasuk kasus rawText hilang / >4000 char
 
 ## 10. Kontrak: `api-contract.md` TIDAK Diubah
 
-Stage 8 **tidak mengubah** `api-contract.md`. Seluruh quick win bersifat
-**internal (hardening)** dan menjaga shape envelope, kode error, dan daftar
-endpoint/IPC yang sudah ada:
+Stage 8 **tidak mengubah** `api-contract.md` (documents ini sendiri tidak menyentuhnya). **`[v1.2]`** Sejak itu, kontrak **memang** berubah melalui jalur resmi: **v1.1** (BYOK + permukaan preload) dan **v1.2** (registry multi-provider, capability/token, privasi) — lihat `api-contract.md` §7. Seluruh quick win Stage 8 tetap bersifat **internal (hardening)** dan menjaga shape envelope, kode error, dan daftar endpoint/IPC yang sudah ada:
 
 - Tidak ada endpoint baru/dihapus; tidak ada perubahan shape `ErrorShape` (§5).
 - `429` + `Retry-After` sudah dinyatakan di `api-contract.md` §3.6.
@@ -666,36 +665,32 @@ endpoint/IPC yang sudah ada:
   `/v1/ai/*` kini diautentikasi (perbaikan bug keamanan), 404 anti-IDOR,
   validasi Zod → 400, `HOST` default loopback.
 
-### 10.1 Usulan penambahan kontrak (minor bump) — untuk BYOK & `.keylox`
+### 10.1 Penambahan kontrak (minor bump) — BYOK & `.keylox` — **[DIPERBARUI v1.2]**
 
-Karena BYOK & import `.keylox` belum diimplementasikan, penambahan berikut
-**diusulkan** saat fitur itu dikerjakan (non-breaking → **bump minor** per
-`api-contract.md` §7):
+> **`[DIPERBARUI v1.2 — menutup REJ-12]`** Pada saat dokumen ini ditulis (Stage 8), BYOK belum diterapkan dan penambahan di bawah bersifat **usulan**. **Kenyataannya kini sudah diterapkan:** `api-contract.md` **v1.1** mengesahkan channel BYOK + header proxy (bump minor), dan **v1.2** menambah registry multi-provider, capability/usage, serta privasi (ADR-03/04/05). Entri di bawah **bukan lagi usulan** — statusnya **terpenuhi/terlampaui**. Dipertahankan sebagai jejak historis.
 
-**a. IPC baru (renderer ⇄ main)** — dari `byok-api-key.md` §5.1:
+**a. IPC BYOK (renderer ⇄ main)** — dari `byok-api-key.md` §5.1 — **status: DITERAPKAN (v1.1, §2.12)**
 
 | Channel | Arah | Payload | Catatan keamanan |
 |---|---|---|---|
 | `settings:setSecret` | invoke | `{ provider, apiKey, model, baseUrl }` | disimpan `safeStorage` **hanya di main** |
-| `settings:hasSecret` | invoke | `{ provider }` → `{ hasKey, masked, model }` | renderer **tidak** pernah menerima key penuh |
+| `settings:hasSecret` | invoke | `{ provider }` → `{ hasKey, masked, model, error? }` | renderer **tidak** pernah menerima key penuh |
 | `settings:clearSecret` | invoke | `{ provider }` | hapus key |
-| `settings:testProvider` | invoke | `{ provider }` → `{ ok, latencyMs, error? }` | prompty "ping" termurah |
+| `settings:testProvider` | invoke | `{ provider, model? }` → v2 (3 tingkat) | prompt "ping" + EditPlan JSON mini (§2.14) |
 | `ai:invoke` | invoke | `{ provider, jobType, payload }` | **semua** panggilan AI via main |
 
+> **`[v1.2]` tambahan channel** (privasi/data/usage/onboarding): `shell:openExternal`, `usage:get`, `privacy:getMode`, `privacy:setMode`, `privacy:confirmExternal`, `data:wipeLocal`, `data:exportLocal` (`api-contract.md` §2.12.7/§2.15/§2.16). Total IPC 83 → **90**.
+
 Konsekuensi kontrak: panggilan AI langsung dari renderer (`fetch` ke provider)
-**dihapus**, diganti `ai:invoke`.
+**dihapus**, diganti `ai:invoke`. ✔ Terpenuhi.
 
-**b. Header backend (mode PROXY saja)** — `byok-api-key.md` §5.2:
-`X-Provider-Key` (TLS-only, **dilarang di-log**), `X-Provider` (opsional).
+**b. Header backend (mode PROXY saja)** — `byok-api-key.md` §5.2 — **status: DITERAPKAN (v1.1/v1.2, §3.7)**
+`X-Provider-Key` (TLS-only, **dilarang di-log**), `X-Provider` (enum id registry §2.13), + **`X-Provider-Base-Url`** (v1.2, anti-SSRF; hanya `custom`/lokal).
 
-**c. Aturan import `.keylox`** — `api-contract.md` §4.4 (Import/Export & Relink):
-tambahkan klausa wajib bahwa entri archive yang keluar dari root ekstraksi,
-bertipe symlink, atau mengandung drive-letter/`..` → **ditolak**; archive dengan
-rasio kompresi ekstrem → **ditolak**; dan archive yang memuat pola key
-(`AIza…`/`sk-…`) → **ditolak + diperingatkan**.
+**c. Aturan import `.keylox`** — `api-contract.md` §4.4 (Import/Export & Relink) — **status: SEBAGIAN (desain)**
+Entri archive yang keluar dari root ekstraksi, bertipe symlink, atau mengandung drive-letter/`..` → **ditolak**; archive dengan rasio kompresi ekstrem → **ditolak**; archive yang memuat pola key (`AIza…`/`sk-…`) → **ditolak + diperingatkan**. *(Implementasi `.keylox` belum ada → tetap desain; lihat §1.3.)*
 
-> Semua usulan di atas **belum** diterapkan. Bila disetujui, `api-contract.md` perlu
-> **bump minor** (1.0 → 1.1) disertai catatan changelog.
+> **Riwayat:** usulan ini disahkan sebagai **v1.1** (`api-contract.md` §7) lalu **v1.2**.
 
 ---
 
@@ -706,11 +701,11 @@ rasio kompresi ekstrem → **ditolak**; dan archive yang memuat pola key
 ```powershell
 cd C:\apk\laragon\www\keylox\keylox_desktop
 
-npm run secret-scan        # → BERSIH (43 berkas, 0 temuan)
+npm run secret-scan        # → BERSIH (55 berkas, 0 temuan)
 npx tsc --noEmit           # → exit 0
 npm run build:renderer     # → secret-scan + vite build sukses
-npm run test:unit          # → 54/54
-npm run test:backend       # → 33/33
+npm run test:unit          # → 159/159
+npm run test:backend       # → 91/91
 
 # Smoke test keamanan backend
 $env:PORT=8799; $env:MOCK_AI='true'; npm run test:backend

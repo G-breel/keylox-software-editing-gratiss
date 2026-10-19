@@ -5,10 +5,13 @@
 > pengembangan pada **2026-10-19 (+07:00)**, bukan asumsi. Yang belum dijalankan
 > ditandai eksplisit **NOT-VERIFIED** (§9) — tidak ada klaim hijau yang dipinjam.
 >
-> **Catatan penomoran:** `byok-api-key.md` sudah memakai judul "07 — BYOK". Berkas
-> ini diminta sebagai `07-pipeline.md`, jadi nomor 07 kini dipakai dua kali.
-> Usulan: ganti judul byok menjadi `08 — BYOK` (dokumen tidak diubah di Stage 9
-> untuk menghindari tabrakan referensi antar-stage).
+> **Catatan penomoran `[DIPERBARUI v1.2 — menutup REJ-14]`:** klaim lama menyebut `byok-api-key.md` memakai
+> judul internal "07 — BYOK", sehingga nomor **07** dianggap bertabrakan dengan berkas ini (`07-pipeline.md`).
+> **Verifikasi v1.2:** H1 nyata `byok-api-key.md` adalah **"BYOK — API Key Milik User"** (tanpa angka), dan
+> deklarasi di badannya menyebut dirinya "dokumen pelengkap (bukan bagian penomoran pipeline 00–08)".
+> Jadi tabrakan nomor **tidak ada**; rujukan antar-stage tetap memakai **nama berkas**, bukan nomor.
+> Dokumen baru `09-rework-v12.md` memakai nomor **09** (bebas). Tidak ada referensi silang yang
+> bergantung pada angka judul.
 
 ---
 

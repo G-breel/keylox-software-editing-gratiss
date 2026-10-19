@@ -71,17 +71,17 @@ export const ExportDialog: React.FC<{ open: boolean; onClose: () => void }> = ({
       bitrate: bitrate,
     });
     setRunning(false);
-    if (res.success) { setStatus('Export selesai ✅'); api.openInFolder(res.path!); }
+    if (res.success) { setStatus('Export selesai.'); api.openInFolder(res.path!); }
     else { setStatus('Export error: ' + res.error); }
   };
 
   if (!open) return null;
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-40" onClick={onClose}>
-      <div className="bg-panel rounded-lg shadow-2xl p-5 w-[520px]" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-panel rounded-lg border border-border p-5 w-[520px]" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-lg font-semibold">Export</h2>
-          <button className="text-textMuted" onClick={onClose}>✕</button>
+          <button className="text-textMuted" onClick={onClose}>Tutup</button>
         </div>
         <div className="flex flex-col gap-3 text-sm">
           <div className="flex gap-2">

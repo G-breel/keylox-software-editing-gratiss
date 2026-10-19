@@ -97,6 +97,7 @@ export const Timeline: React.FC = () => {
                   return (
                     <div
                       key={clip.id}
+                      data-testid="timeline-clip"
                       className={`absolute top-1 h-8 rounded text-[10px] px-1 flex items-center cursor-pointer border ${selected ? 'border-active bg-active/20' : 'border-border bg-elevated'}`}
                       style={{ left, width: w }}
                       onClick={() => onClipClick(clip.id)}

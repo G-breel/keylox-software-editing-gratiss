@@ -1,11 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useEditorStore } from '../stores/editorStore';
 import { fileUrl } from '../lib/utils';
+import { TrackingPanel } from './TrackingPanel';
 
 export const PreviewPlayer: React.FC = () => {
   const store = useEditorStore();
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [trackingOpen, setTrackingOpen] = useState(false);
   const clip = store.getSelectedClip();
   const src = clip?.path || store.tracks.flatMap(t=>t.clips)[0]?.path;
 
@@ -45,6 +47,14 @@ export const PreviewPlayer: React.FC = () => {
 
   return (
     <div className="flex-1 bg-black relative flex items-center justify-center overflow-hidden">
+      <button
+        type="button"
+        className="absolute right-3 top-3 z-20 rounded border border-border bg-panel/90 px-2 py-1 text-[11px] text-textPrimary transition-colors duration-150 ease-out hover:bg-elevated"
+        onClick={() => setTrackingOpen((v) => !v)}
+      >
+        Editor tracking
+      </button>
+      {trackingOpen && <TrackingPanel onClose={() => setTrackingOpen(false)} />}
       <div className="relative" style={{ aspectRatio: store.aspectRatio.replace(':', '/'), maxHeight: '100%', maxWidth: '100%' }}>
         <video
           ref={videoRef}

@@ -8,6 +8,7 @@ import { PromptBar } from './components/PromptBar';
 import { StatusBar } from './components/StatusBar';
 import { ExportDialog } from './components/ExportDialog';
 import { SettingsModal } from './components/SettingsModal';
+import { ToastHost } from './components/ToastHost';
 import { useEditorStore } from './stores/editorStore';
 import { api } from './lib/ipc';
 
@@ -15,6 +16,7 @@ export const App: React.FC = () => {
   const store = useEditorStore();
   const [exportOpen, setExportOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [promptSeed, setPromptSeed] = useState<{ text: string; id: number } | null>(null);
 
   const openFiles = useCallback(async () => {
     const paths = await api.openFiles();
@@ -37,6 +39,12 @@ export const App: React.FC = () => {
   // `html[data-app-ready="true"]`). Setelah store tersedia, bukan setelah timer.
   useEffect(() => {
     document.documentElement.dataset.appReady = 'true';
+  }, []);
+
+  /** Aksi jobType dari Settings mengisi bilah perintah (R2.3). */
+  const handleUsePrompt = useCallback((text: string) => {
+    setPromptSeed({ text, id: Date.now() });
+    setSettingsOpen(false);
   }, []);
 
   useEffect(() => {
@@ -80,7 +88,7 @@ export const App: React.FC = () => {
   }, []);
 
   return (
-    <div className="h-screen flex flex-col bg-app">
+    <div className="h-screen flex flex-col bg-app" data-testid="app-ready">
       <TopBar onOpenFiles={openFiles} onOpenFolder={openFolder} onExport={() => setExportOpen(true)} onSettings={() => setSettingsOpen(true)} />
       <div className="flex flex-1 overflow-hidden">
         <MediaPanel />
@@ -90,10 +98,15 @@ export const App: React.FC = () => {
         </div>
         <Inspector onExport={() => setExportOpen(true)} />
       </div>
-      <PromptBar onExport={() => setExportOpen(true)} onOpenSettings={() => setSettingsOpen(true)} />
+      <PromptBar
+        onExport={() => setExportOpen(true)}
+        onOpenSettings={() => setSettingsOpen(true)}
+        seed={promptSeed}
+      />
       <StatusBar />
       <ExportDialog open={exportOpen} onClose={() => setExportOpen(false)} />
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} onUsePrompt={handleUsePrompt} />
+      <ToastHost />
     </div>
   );
 };

@@ -174,12 +174,27 @@ test('output yang gagal validasi TIDAK pernah masuk cache', async () => {
   const validate = () => ({ ok: false, issues: [{ path: 'ops', message: 'ditolak' }] });
 
   for (let i = 0; i < 2; i++) {
+    // jobType CACHEABLE (§3.5 v1.2) → membuktikan output tidak valid benar-benar
+    // tidak tersimpan, bukan sekadar "tidak ada cache".
     await assert.rejects(
-      gemini.cachedGenerate('unit_invalid', input, genFn, { validate }),
+      gemini.cachedGenerate('vision_color', input, genFn, { validate }),
       (err) => err.code === 'ERR_AI_INVALID_RESPONSE' && err.retryable === true,
     );
   }
   assert.equal(calls, 2, 'output tidak valid tidak boleh dilayani dari cache');
+});
+
+test('cache hanya untuk jobType struktural: jobType berkonten selalu miss (§3.5 v1.2)', async () => {
+  const input = { probe: `cache-content-${uuidv4()}` };
+  let calls = 0;
+  const genFn = async () => { calls += 1; return { json: { ok: true }, tokens: { input: 0, output: 0 } }; };
+
+  const first = await gemini.cachedGenerate('parse_command', input, genFn, { keyFingerprint: 'aaaaaaaa' });
+  const second = await gemini.cachedGenerate('parse_command', input, genFn, { keyFingerprint: 'aaaaaaaa' });
+
+  assert.equal(first.cacheHit, false);
+  assert.equal(second.cacheHit, false, 'parse_command (berkonten) tidak boleh di-cache');
+  assert.equal(calls, 2);
 });
 
 test('kunci cache memakai hash(key)[8]: key berbeda → cache miss', async () => {
@@ -187,9 +202,9 @@ test('kunci cache memakai hash(key)[8]: key berbeda → cache miss', async () =>
   let calls = 0;
   const genFn = async () => { calls += 1; return { json: { ok: true }, tokens: { input: 0, output: 0 } }; };
 
-  const a1 = await gemini.cachedGenerate('unit_cache', input, genFn, { keyFingerprint: 'aaaaaaaa' });
-  const a2 = await gemini.cachedGenerate('unit_cache', input, genFn, { keyFingerprint: 'aaaaaaaa' });
-  const b1 = await gemini.cachedGenerate('unit_cache', input, genFn, { keyFingerprint: 'bbbbbbbb' });
+  const a1 = await gemini.cachedGenerate('scene_detect', input, genFn, { keyFingerprint: 'aaaaaaaa' });
+  const a2 = await gemini.cachedGenerate('scene_detect', input, genFn, { keyFingerprint: 'aaaaaaaa' });
+  const b1 = await gemini.cachedGenerate('scene_detect', input, genFn, { keyFingerprint: 'bbbbbbbb' });
 
   assert.equal(a1.cacheHit, false);
   assert.equal(a2.cacheHit, true, 'key sama + input sama → cache hit');

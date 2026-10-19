@@ -27,7 +27,7 @@ function reasonOf(fn) {
 function expectBlocked(baseUrl, reason) {
   const out = reasonOf(() => registry.assertBaseUrlAllowed(baseUrl, GEMINI));
   assert.ok(out, `baseUrl seharusnya ditolak: ${baseUrl}`);
-  assert.equal(out.code, 'ERR_VALIDATION_PAYLOAD');
+  assert.equal(out.code, 'ERR_PROVIDER_BASE_URL_NOT_ALLOWED');
   assert.equal(out.httpStatus, 400);
   assert.equal(out.reason, reason, `reason salah untuk ${baseUrl}: ${JSON.stringify(out)}`);
   return out;
@@ -141,14 +141,17 @@ test('format key yang tidak sah ditolak tanpa menggemakan nilainya', () => {
   }
 });
 
-test('X-Provider default gemini; openai (belum didukung) → ERR_PROVIDER_UNSUPPORTED', () => {
+test('X-Provider default gemini; provider tak dikenal → ERR_PROVIDER_UNSUPPORTED', () => {
   assert.equal(registry.resolveProvider(undefined).id, 'gemini');
   assert.equal(registry.resolveProvider('').id, 'gemini');
   assert.equal(registry.resolveProvider('GEMINI').id, 'gemini');
+  // v1.2: registry backend kini memuat 13 provider (§2.13) — `openai` SUPPORTED.
+  assert.equal(registry.resolveProvider('openai').id, 'openai');
+  assert.equal(registry.resolveProvider('groq').id, 'groq');
 
-  const openai = reasonOf(() => registry.resolveProvider('openai'));
-  assert.equal(openai.code, 'ERR_PROVIDER_UNSUPPORTED');
-  assert.equal(openai.httpStatus, 400);
+  const unknown = reasonOf(() => registry.resolveProvider('cohere'));
+  assert.equal(unknown.code, 'ERR_PROVIDER_UNSUPPORTED');
+  assert.equal(unknown.httpStatus, 400);
 });
 
 test('provider tak dikenal ditolak dan label-nya disanitasi (tanpa pantulan mentah)', () => {

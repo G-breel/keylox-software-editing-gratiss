@@ -10,6 +10,7 @@ const cache = require('../services/cache');
 const queue = require('../services/queue');
 const usage = require('../services/usage');
 const editPlanGate = require('../services/editPlanGate');
+const providerRegistry = require('../services/providerRegistry');
 const {
   JOB_TYPES,
   ParseCommandSchema,
@@ -39,8 +40,17 @@ async function runCached(task, input, prompt, opts = {}) {
     reqKey: opts.reqKey,
     keyFingerprint: opts.keyFingerprint,
   });
-  usage.recordTokens(deviceId, tokens.input, tokens.output);
+  usage.recordTokens(deviceId, tokens.input, tokens.output, {
+    provider: opts.provider, model: opts.model, jobType: task, cacheHit,
+  });
   return { result, tokens, cacheHit };
+}
+
+/** Identitas provider/model untuk pencatatan usage (§2.16) — tanpa nilai key. */
+function providerInfo(request) {
+  const provider = request.provider || null;
+  const rec = provider ? providerRegistry.PROVIDERS[provider] : null;
+  return { provider, model: rec ? rec.defaultModel : null };
 }
 
 function ensure(obj, defaults) {
@@ -74,6 +84,8 @@ function processorPrompt(jobType, job) {
   const shapes = {
     scene_detect: `${base}\nHasilkan JSON: { "scenes": [{"startMs":number,"endMs":number,"label":string}], "count":number }`,
     asr: `${base}\nHasilkan JSON: { "text":string, "segments":[{"startMs":number,"endMs":number,"text":string}], "language":string, "durationMs":number }`,
+    // [v1.2] R6.2 — `transcribe` adalah nama KANONIK (`asr` tetap alias lama).
+    transcribe: `${base}\nHasilkan JSON: { "text":string, "segments":[{"startMs":number,"endMs":number,"text":string}], "language":string, "durationMs":number }`,
     highlight: `${base}\nHasilkan JSON: { "highlights":[{"startMs":number,"endMs":number,"score":number,"reason":string}], "montageDurationMs":number }`,
     ocr: `${base}\nHasilkan JSON: { "texts":[{"startMs":number,"endMs":number,"text":string,"box":[number]}], "fullText":string }`,
     metadata: `${base}\nHasilkan JSON: { "titles":[string], "description":string, "hashtags":[string], "language":string }`,
@@ -104,7 +116,9 @@ for (const jt of JOB_TYPES) {
       async () => gemini.generateJson(prompt, { ...genOpts, reqKey: creds.key }),
       { reqKey: creds.key, keyFingerprint: creds.fingerprint },
     );
-    usage.recordTokens(job.deviceId, tokens.input, tokens.output);
+    usage.recordTokens(job.deviceId, tokens.input, tokens.output, {
+      provider: creds.provider, jobType: jt, cacheHit: false,
+    });
     report(1);
     return { result, resultRef: null };
   });
@@ -170,7 +184,9 @@ Hasilkan JSON dengan shape:
       data.tokensUsed = tokens;
       data.cacheHit = cacheHit;
       data.latencyMs = Date.now() - start;
-      usage.recordTokens(request.deviceId, tokens.input, tokens.output);
+      usage.recordTokens(request.deviceId, tokens.input, tokens.output, {
+        ...providerInfo(request), jobType: 'parse_command', cacheHit,
+      });
       return ok(reply, data, request.id);
     } catch (err) {
       logger.error({ err: err.message || err, code: err.code, rid: request.id }, 'parse-command failed');
@@ -204,7 +220,9 @@ Hasilkan JSON: { "reply": string, "plan": object | null }`;
       const data = { ...result };
       data.tokensUsed = tokens;
       data.cacheHit = cacheHit;
-      usage.recordTokens(request.deviceId, tokens.input, tokens.output);
+      usage.recordTokens(request.deviceId, tokens.input, tokens.output, {
+        ...providerInfo(request), jobType: 'chat', cacheHit,
+      });
       return ok(reply, data, request.id);
     } catch (err) {
       return fail(reply, err, request.id);
@@ -237,7 +255,9 @@ Hasilkan JSON seperti AiParseResult: { "commandId":uuid, "intent":string, "comma
       data.tokensUsed = tokens;
       data.cacheHit = cacheHit;
       data.latencyMs = Date.now() - start;
-      usage.recordTokens(request.deviceId, tokens.input, tokens.output);
+      usage.recordTokens(request.deviceId, tokens.input, tokens.output, {
+        ...providerInfo(request), jobType: 'refine', cacheHit,
+      });
       return ok(reply, data, request.id);
     } catch (err) {
       return fail(reply, err, request.id);
@@ -325,6 +345,7 @@ Hasilkan JSON seperti AiParseResult: { "commandId":uuid, "intent":string, "comma
           genOpts,
           reqKey: request.providerKey,
           keyFingerprint: request.providerKeyFingerprint,
+          ...providerInfo(request),
         });
         const data = ensure(result, defaultResult || {});
         data.tokensUsed = tokens;
@@ -391,6 +412,8 @@ Hasilkan JSON: { "grade":{"brightness":number,"contrast":number,"saturation":num
       // validasi output AI. Membantu ops memverifikasi SEC-PROMPT-01 aktif.
       provider: request.provider || null,
       providerKeySource: request.providerKeySource || 'none',
+      // [v1.2] §2.16 — estimasi biaya (bukan tagihan) untuk provider aktif.
+      estCostUsd: Number.isFinite(Number(u.estCostUsd)) ? Number(u.estCostUsd) : null,
       editPlanGate: editPlanGate.gateStatus(),
     }, request.id);
   });

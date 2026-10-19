@@ -37,7 +37,7 @@ const RefineSchema = z.object({
 }).strict();
 
 const JOB_TYPES = [
-  'scene_detect', 'asr', 'highlight', 'ocr', 'metadata', 'thumbnail', 'reframe', 'translate', 'tts',
+  'scene_detect', 'asr', 'transcribe', 'highlight', 'ocr', 'metadata', 'thumbnail', 'reframe', 'translate', 'tts',
   'montage', 'search', 'index_asset', 'vision_color', 'script', 'moderation',
 ];
 

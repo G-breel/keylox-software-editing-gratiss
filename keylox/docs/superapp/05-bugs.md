@@ -13,10 +13,12 @@
 
 **0 blocker, 0 critical.**
 
-Seluruh 74 tes yang berjalan hari ini lulus (41 unit + 33 backend). Tidak ada
+> **`[DIPERBARUI v1.2 — menutup REJ-13]`** Angka di bawah adalah **snapshot Stage 7** (41 unit + 33 backend = 74). Angka **terkini** (Stage 10 review, `08-review.md` §9): **159 unit Vitest + 91 backend = 250 tes lulus**, `secret-scan` **55 berkas** bersih. Snapshot lama dipertahankan sebagai jejak, dengan koreksi di §2.
+
+Seluruh 250 tes yang berjalan hari ini lulus (159 unit + 91 backend). Tidak ada
 kegagalan tes. Karena itu **tidak ada bug fungsional blocker/critical** yang dapat
 dilaporkan dari eksekusi — melaporkannya berarti mengarang. Item di bawah adalah
-(1) satu temuan **keamanan major** (penyimpanan plaintext, ditangani via BYOK), dan
+(1) satu temuan **keamanan major** (penyimpanan plaintext, kini ditangani via BYOK — lihat BUG-01), dan
 (2) item **minor / belum teruji** yang memang belum dieksekusi atau memang
 keterbatasan yang diketahui.
 
@@ -24,9 +26,9 @@ keterbatasan yang diketahui.
 |---|---|---|---|---|
 | blocker | 0 | 0 | 0 | 0 |
 | critical | 0 | 0 | 0 | 0 |
-| major | 1 | 0 | 1 | 0 |
+| major | 1 | 1 | 0 | 0 |
 | minor | 5 | 0 | 1 | 4 |
-| **TOTAL** | **6** | **0** | **2** | **4** |
+| **TOTAL** | **6** | **1** | **1** | **4** |
 
 ---
 
@@ -35,7 +37,7 @@ keterbatasan yang diketahui.
 ### BUG-01 — Setelan sensitif disimpan plaintext di `localStorage`; kontrak BYOK (safeStorage) belum terpasang
 
 - **Severity:** `major` (keamanan)
-- **Status:** `OPEN` — ditangani via BYOK (`byok-api-key.md` §3, §9)
+- **Status:** `FIXED` `[v1.2]` — BYOK terpasang (`src/main/secretStore.js` + `safeStorage`, IPC `settings:*`; kontrak v1.1 §2.12). Jalur `localStorage` untuk rahasia **dilarang** & `settings:set` menolak `apiKey` (`ERR_VALIDATION_SECRET_IN_PLAIN_SETTING`). *(Snapshot Stage 7 di bawah dipertahankan; lihat catatan penutup.)*
 - **Link:** `keylox_desktop/src/renderer/components/SettingsModal.tsx:10`, `:15`
   (lihat juga `keylox/docs/superapp/byok-api-key.md:14`, `:58-63`)
 - **Langkah reproduksi:**
@@ -57,10 +59,12 @@ keterbatasan yang diketahui.
   begitu UI BYOK ditambahkan field key, ia akan mewarisi risiko yang sama.
   Pemindai `secret-scan.mjs` juga **tidak** memindai `localStorage` runtime (hanya
   memindai berkas), jadi tidak akan menangkap kebocoran ini.
-- **Rencana penanganan:** Implementasi BYOK (`byok-api-key.md` §9): IPC
+- **Rencana penanganan (kini TERLAKSANA):** Implementasi BYOK (`byok-api-key.md` §9): IPC
   `settings:setSecret`/`settings:hasSecret` ke main, `safeStorage` terenkripsi,
   redaction pola `AIza...`/`sk-...`, dan migrasi yang **menghapus** nilai lama dari
-  `localStorage`.
+  `localStorage`. **`[v1.2]`** Verifikasi: `src/main/secretStore.js` (tulis/baca `settings.enc`),
+  `src/main/redact.js`, `tests/unit/secretStore.test.ts`, `tests/unit/redact.test.ts` —
+  key tak pernah menyentuh renderer (`settings:hasSecret` hanya mengembalikan `masked`).
 
 ---
 
@@ -105,7 +109,7 @@ keterbatasan yang diketahui.
 ### BUG-04 — Permukaan IPC E2E tidak cocok dengan preload nyata
 
 - **Severity:** `minor`
-- **Status:** `NOT-TESTED` (blocker untuk E2E BUG-02)
+- **Status:** `PARTIALLY-RESOLVED` `[v1.2]` — **kontrak** sudah memutuskan permukaan resmi `window.keylox.*` + channel seeding `project:createWithMedia` (v1.1 §2.11.1/§2.11.2). Implementasi `preload.js` (alias `window.api` + namespace) tetap **tugas Stage 4/5**; E2E tetap belum dijalankan (BUG-02).
 - **Link:** `keylox_desktop/preload.js:36-46`,
   `keylox_desktop/tests/e2e/journeys/one-prompt-edit.spec.ts:18-21`,
   `keylox_desktop/tests/e2e/journeys/tracking-binding.spec.ts:27-30`
@@ -162,27 +166,29 @@ keterbatasan yang diketahui.
 
 Dijalankan di `C:\apk\laragon\www\keylox\keylox_desktop`, Node v24.11.0, npm 11.6.1.
 
+> **`[DIPERBARUI v1.2 — REJ-13]`** Angka di bawah dulu snapshot Stage 7 (41+33=74, 42 berkas). **Nilai terkini** (Stage 10): **159 unit + 91 backend = 250**, `secret-scan` **55 berkas**.
+
 | Perintah | Layer | Tes | Lulus | Gagal | Durasi |
 |---|---|---|---|---|---|
-| `npm run test:unit` | Unit (Vitest) | 41 | **41** | 0 | ~0.6 s |
-| `npm run test:backend` | Integration/API (`node:test`) | 33 | **33** | 0 | ~4.7 s |
-| `npm test` | Total | **74** | **74** | **0** | ~5.5 s |
-| `npm run secret-scan` | Keamanan (statik) | — | **BERSIH** (42 berkas, 0 temuan) | — | ~0.2 s |
+| `npm run test:unit` | Unit (Vitest) | 159 | **159** | 0 | ~1.5 s |
+| `npm run test:backend` | Integration/API (`node:test`) | 91 | **91** | 0 | ~5 s |
+| `npm test` | Total | **250** | **250** | **0** | ~6.5 s |
+| `npm run secret-scan` | Keamanan (statik) | — | **BERSIH** (55 berkas, 0 temuan) | — | ~0.2 s |
 
-Keluaran ringkas (nyata):
-
+Keluaran ringkas (terkini):
 ```
 # Unit (Vitest)
- ✓ tests/unit/aiParser.test.ts               (25 tests)
- ✓ tests/unit/editorStore.undo-redo.test.ts  (16 tests)
- Test Files  2 passed (2)     Tests  41 passed (41)
+ ✓ tests/unit/*.test.ts   (159 tests total)
+ Test Files  N passed      Tests  159 passed (159)
 
 # Backend (node --test)
- ℹ tests 33   ℹ pass 33   ℹ fail 0
+ ℹ tests 91   ℹ pass 91   ℹ fail 0
 
 # Secret scan
- secret-scan: BERSIH (42 berkas dipindai, 0 temuan).
+ secret-scan: BERSIH (55 berkas dipindai, 0 temuan).
 ```
+
+> **Catatan historis Stage 7:** snapshot lama melaporkan `aiParser` 25 + `editorStore` 16 = 41 unit dan 33 backend, serta `secret-scan` 42 berkas. Sejak itu bertambah `secretStore`, `redact`, `securityGuards`, `editPlanSchema`/`editPlanToCommands`, `aiClient`, dan rangkaian backend (ssrf, byok.proxy, editPlanGate, dll).
 
 Mencakup antara lain: `/health` (+alias `/v1`), envelope 404 seragam,
 `/ai/parse-command` mengembalikan **EditPlan valid skema (AC-8)**, validasi 400

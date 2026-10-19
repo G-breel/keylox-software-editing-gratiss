@@ -5,10 +5,10 @@
 --  Sumber kebenaran : 00-spec.md v2.2 (§11 Entitas Inti, §11.6 Aturan Integritas)
 --                     01-architecture.md (boundary modul, storage, tracking = satu sumber kebenaran)
 --                     02-design.md (flow import/relink, tracking editor, EditPlan preview)
---                     api-contract.md §4 (storage contract .keylox, manifest, daftar tabel)
+--                     api-contract.md v1.2 §4 (storage contract .keylox, manifest, daftar tabel)
 --  Target           : aplikasi desktop Electron (Windows primary), main process (Node.js)
 --  Engine           : SQLite 3.4x via better-sqlite3 (sinkron, single-writer, WAL)
---  Versi skema      : 1 (initial migration, idempotent)
+--  Versi skema      : 1 (initial migration, idempotent) + rework v1.2 (aditif, idempoten)
 --  Bahasa           : komentar Indonesia
 -- -------------------------------------------------------------------------------------
 --  CARA PAKAI (ringkas)
@@ -36,6 +36,18 @@
 --    * Enum     : TEXT + CHECK — bukan angka, agar mudah dibaca di log & aman saat menambah nilai.
 --    * JSON     : TEXT + CHECK (json_valid(…)) — untuk params uniform shader, curves, ops EditPlan.
 --    * Nama     : snake_case, plural untuk tabel, `idx_<tabel>_<kolom>` untuk index.
+--
+--  CATATAN REWORK v1.2 (Okt 2026) — perubahan MINIMAL & IDEMPOTEN
+--    * `ai_usage_records` + kolom `provider TEXT` dan `est_cost_usd REAL`
+--      (ADR-03/ADR-04; api-contract §2.16). Keduanya NULL-able → baris lama tetap valid.
+--    * Index baru `idx_ai_usage_records_provider` (query panel Usage per provider).
+--    * View `v_ai_usage_daily` diperluas: `provider` + `est_cost_usd` (SUM/ROUND).
+--    * Preferensi privasi (ADR-05) TIDAK membuat tabel baru: memakai `user_settings`
+--      key-value yang sudah ada (`privacy.mode`, `privacy.confirm.<provider>`).
+--    * `undo_records.group_id` (1 perintah AI = 1 grup undo, REJ-01) SUDAH ADA sejak v1 —
+--      tidak ada perubahan skema untuk undo; perbaikan ada di renderer (Stage 4/5).
+--    * SEMUA perubahan bersifat ADDITIF (ADD COLUMN / CREATE ... IF NOT EXISTS) — tidak ada
+--      tabel/kolom lama yang dihapus/di-rename. Lihat BAGIAN 18 untuk pola migrasi idempoten.
 -- =====================================================================================
 
 /* =====================================================================================
@@ -97,8 +109,10 @@
     4. `clips` melayani klip video & gambar (media statis di timeline) — perbedaan hanya durasi default,
        dan `src_in_ms/src_out_ms` tetap bermakna. Tabel terpisah = duplikasi 20 kolom.
     5. `user_settings` menyimpan seluruh preferensi non-rahasia sebagai baris key/value (bukan 40 kolom
-       di `users`). Rahasia (backendBaseUrl token, userToken, deviceId) TIDAK di sini — di OS keychain
-       via safeStorage (01-architecture §5.1, api-contract §6.1).
+       di `users`). Rahasia (backendBaseUrl token, userToken, deviceId, **[v1.2] API key provider per-provider**)
+       TIDAK di sini — di OS keychain via safeStorage (01-architecture §5.1, api-contract §6.1).
+       `[v1.2]` Preferensi **privasi** (bukan rahasia) tetap di tabel ini: `privacy.mode`,
+       `privacy.confirm.<provider>` (ADR-05, api-contract §2.15).
     6. `clip_transforms` + `color_grades` + `chroma_keys` + `blends` = 1:1 dengan clips TETAPI sengaja
        DIPISAH dari `clips`: (a) baris hanya dibuat saat fitur dipakai (klip netral = tanpa 5 baris
        kosong); (b) boundary modul M3/M4/M6 terpisah (01-architecture §3); (c) SQLite menulis ulang
@@ -111,7 +125,8 @@
 
    DIPISAH (satu entitas → beberapa tabel, karena lifecycle/tanggung jawab berbeda):
     8. Empat jenis pekerjaan asinkron TIDAK digabung:
-         `export_jobs` (FFmpeg lokal), `ai_jobs` (cloud Gemini via proxy), `index_jobs` (indeks aset lokal),
+         `export_jobs` (FFmpeg lokal), `ai_jobs` (cloud via DIRECT/PROXY, multi-provider — api-contract §6.4),
+        `index_jobs` (indeks aset lokal),
          `tracking_sessions` (M14, on-device). Kolom progres, status, dan pemiliknya berbeda; katalog
          error pun berbeda (ERR_EXPORT_* vs ERR_AI_* vs ERR_TRACKING_*). Digabung = banyak kolom NULL
          + status yang tidak bermakna. Untuk UI "semua job aktif" disediakan view `v_active_jobs`.
@@ -260,31 +275,45 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_device_id
   ON users(device_id) WHERE device_id IS NOT NULL;
 
--- 3.2 user_settings — preferensi non-rahasia. RAHASIA (token) tidak pernah masuk database.
+-- 3.2 user_settings — preferensi non-rahasia. RAHASIA (token/key) tidak pernah masuk database.
+--     [v1.2] Preferensi privasi (ADR-05) memakai tabel ini apa adanya, TANPA tabel baru:
+--            key 'privacy.mode' = {"v":"standard"} | {"v":"local-only"} | {"v":"cloud"}
+--            key 'privacy.confirm.<provider>' = {"v":true,"at":"<ISO>"}  (konfirmasi freeTierTraining)
+--     Sebelum lapisan DB tersedia (GAP-01), main process menyimpan 'privacy.mode' di settings.enc dulu.
 CREATE TABLE IF NOT EXISTS user_settings (
   user_id    TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-  key        TEXT NOT NULL,                                      -- 'ui.language', 'export.default_preset', ...
+  key        TEXT NOT NULL,                                      -- 'ui.language', 'export.default_preset', 'privacy.mode', ...
   value_json TEXT NOT NULL CHECK (json_valid(value_json)),
   updated_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER) * 1000),
   PRIMARY KEY (user_id, key)
 ) WITHOUT ROWID;
 
--- 3.3 ai_usage_records — murni operasional (biaya & performa). Tanpa nilai uang, tanpa entitlement.
+-- 3.3 ai_usage_records — murni operasional (biaya & performa). Tanpa entitlement.
+--     [v1.2] + provider (ADR-03) & est_cost_usd (ADR-04). est_cost_usd = ESTIMASI, bukan tagihan;
+--            NULL bila harga provider tak diketahui (api-contract §2.16) → UI hanya tampilkan token.
 CREATE TABLE IF NOT EXISTS ai_usage_records (
   usage_id      TEXT    NOT NULL PRIMARY KEY,
   user_id       TEXT REFERENCES users(user_id)    ON DELETE SET NULL,
   project_id    TEXT REFERENCES projects(project_id) ON DELETE SET NULL,
   command_id    TEXT,                                            -- diisi bila berasal dari perintah AI
   job_id        TEXT,                                            -- diisi bila berasal dari ai_jobs
-  job_type      TEXT    NOT NULL,                                -- parse_command/chat/asr/scene_detect/...
-  model         TEXT,                                            -- mis. gemini-2.5-flash
+  job_type      TEXT    NOT NULL,                                -- parse_command/chat/transcribe/scene_detect/... (`transcribe` kanonik; `asr` alias lama)
+  provider      TEXT,                                            -- [v1.2] id registry (gemini/openai/anthropic/...); ADR-03
+  model         TEXT,                                            -- mis. gemini-2.5-flash / gpt-4o-mini / claude-3-5-haiku-latest
   input_tokens  INTEGER NOT NULL DEFAULT 0 CHECK (input_tokens  >= 0),
   output_tokens INTEGER NOT NULL DEFAULT 0 CHECK (output_tokens >= 0),
+  est_cost_usd  REAL    CHECK (est_cost_usd IS NULL OR est_cost_usd >= 0),  -- [v1.2] estimasi USD; NULL = harga tak diketahui
   latency_ms    INTEGER CHECK (latency_ms IS NULL OR latency_ms >= 0),
   cache_hit     INTEGER NOT NULL DEFAULT 0 CHECK (cache_hit IN (0,1)),
   queued_reason TEXT CHECK (queued_reason IS NULL OR queued_reason IN ('none','offline','limit')),
   created_at    INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER) * 1000)
 );
+
+-- 3.3.1 Index ai_usage_records [v1.2]. `provider` untuk panel Usage per-provider; `created_at`
+--       untuk agregasi harian (usage:get range). Semua IF NOT EXISTS → idempoten.
+CREATE INDEX IF NOT EXISTS idx_ai_usage_records_provider   ON ai_usage_records(provider)   WHERE provider   IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_ai_usage_records_created_at ON ai_usage_records(created_at);
+CREATE INDEX IF NOT EXISTS idx_ai_usage_records_provider_day ON ai_usage_records(provider, created_at) WHERE provider IS NOT NULL;
 
 -- 3.4 audit_logs — diagnostik & dukungan (tanpa PII).
 CREATE TABLE IF NOT EXISTS audit_logs (
@@ -2024,19 +2053,23 @@ SELECT 'index'    AS job_kind, job_id     AS job_id, project_id, status, progres
 UNION ALL
 SELECT 'tracking' AS job_kind, session_id AS job_id, project_id, status, progress, started_at, error_code FROM tracking_sessions WHERE status IN ('queued','analyzing');
 
--- 15.11 Monitoring biaya AI per hari (RSK-02; tanpa PII, tanpa nilai uang).
+-- 15.11 Monitoring biaya AI per hari (RSK-02). [v1.2] + `provider` & `est_cost_usd` (ADR-04).
+--       `est_cost_usd` = ESTIMASI biaya (bukan tagihan, bukan monetisasi in-app; api-contract §2.16);
+--       NULL bila harga provider tak diketahui → kolom agregat 0 (UI tetap tampilkan token terpisah).
 CREATE VIEW IF NOT EXISTS v_ai_usage_daily AS
 SELECT
   date(created_at / 1000, 'unixepoch')            AS usage_day,
+  provider,                                       -- [v1.2] id registry (NULL untuk baris v1 lama)
   job_type,
   COUNT(*)                                        AS request_count,
   SUM(cache_hit)                                  AS cache_hit_count,
   ROUND(100.0 * SUM(cache_hit) / COUNT(*), 2)     AS cache_hit_pct,
   SUM(input_tokens)                               AS input_tokens,
   SUM(output_tokens)                              AS output_tokens,
+  ROUND(SUM(COALESCE(est_cost_usd, 0.0)), 6)      AS est_cost_usd,   -- [v1.2]
   ROUND(AVG(latency_ms), 1)                       AS avg_latency_ms
 FROM ai_usage_records
-GROUP BY usage_day, job_type;
+GROUP BY usage_day, provider, job_type;
 
 -- =====================================================================================
 --  BAGIAN 16 — FTS5 (pencarian teks & momen)
@@ -2151,7 +2184,11 @@ INSERT OR IGNORE INTO user_settings (user_id, key, value_json) VALUES
   ('local-guest', 'telemetry.opt_in',         '{"v":false}'),
   ('local-guest', 'export.default_preset_id', '{"v":"preset_tiktok_1080x1920"}'),
   ('local-guest', 'export.ask_ai_settings',   '{"v":true}'),
-  ('local-guest', 'media.default_mode',       '{"v":"reference"}');
+  ('local-guest', 'media.default_mode',       '{"v":"reference"}'),
+  -- [v1.2] Preferensi privasi (ADR-05). 'privacy.mode' = standard|local-only|cloud.
+  --        Kunci 'privacy.confirm.<provider>' dibuat ON-DEMAND saat pengguna menyetujui provider
+  --        yang memakai tier-gratis untuk training (TIDAK diseed di sini agar tidak ambigu).
+  ('local-guest', 'privacy.mode',             '{"v":"standard"}');
 
 -- 17.5 Preset export bawaan (R-10). `is_builtin = 1` → tidak dapat dihapus pengguna.
 INSERT OR IGNORE INTO export_presets
@@ -2205,6 +2242,27 @@ VALUES
 --    -- UPDATE projects SET schema_version = 2;
 --    -- INSERT INTO schema_migrations (version, name, applied_at, notes) VALUES (2, 'add_clip_motion_blur', ..., '...');
 --    -- COMMIT;
+--
+--  Contoh migrasi REWORK v1.2 (ADD kolom idempoten — guard `pragma_table_info`):
+--    KENAPA di-guard: `ALTER TABLE ... ADD COLUMN` GAGAL bila kolom sudah ada (tidak ada IF NOT EXISTS
+--    di SQLite). Karena file ini idempoten (dijalankan berkali-kali), guard berikut WAJIB:
+--
+--    -- 001_002 -> 003_ai_usage_provider_cost.sql   (dijalankan oleh runner dalam SATU transaksi)
+--    --   const cols = db.prepare("SELECT name FROM pragma_table_info('ai_usage_records')").all().map(r=>r.name);
+--    --   if (!cols.includes('provider'))     db.exec("ALTER TABLE ai_usage_records ADD COLUMN provider TEXT;");
+--    --   if (!cols.includes('est_cost_usd')) db.exec("ALTER TABLE ai_usage_records ADD COLUMN est_cost_usd REAL;");
+--    --   db.exec("CREATE INDEX IF NOT EXISTS idx_ai_usage_records_provider ON ai_usage_records(provider) WHERE provider IS NOT NULL;");
+--    --   db.exec("CREATE INDEX IF NOT EXISTS idx_ai_usage_records_created_at ON ai_usage_records(created_at);");
+--    --   db.exec("CREATE INDEX IF NOT EXISTS idx_ai_usage_records_provider_day ON ai_usage_records(provider, created_at) WHERE provider IS NOT NULL;");
+--    --   db.exec("DROP VIEW IF EXISTS v_ai_usage_daily;");   -- view WAJIB di-drop lalu dibuat ulang
+--    --   db.exec("<CREATE VIEW v_ai_usage_daily ... (versi v1.2, lihat BAGIAN 15.11)>");
+--    --   db.exec("INSERT OR IGNORE INTO user_settings (user_id,key,value_json) VALUES ('local-guest','privacy.mode','{\"v\":\"standard\"}');");
+--    --   db.exec("UPDATE projects SET schema_version = 3;");
+--    --   db.exec("INSERT INTO schema_migrations (version,name,applied_at,notes) VALUES (3,'ai_usage_provider_cost',...,'rework v1.2');");
+--
+--    CATATAN: `ALTER TABLE ADD COLUMN` dengan nilai DEFAULT konstanta aman di SQLite (tidak menulis ulang
+--    tabel). Kolom baru `provider`/`est_cost_usd` NULL-able → baris lama tetap valid. View tidak punya
+--    `IF NOT EXISTS` untuk kolom baru, jadi view harus di-`DROP VIEW IF EXISTS` lalu dibuat ulang.
 --
 --  Contoh migrasi yang MENGUBAH CONSTRAINT (butuh 12-step rebuild — SQLite tidak punya ALTER CONSTRAINT):
 --    1) PRAGMA foreign_keys = OFF;  (di luar transaksi)

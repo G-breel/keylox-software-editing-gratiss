@@ -103,7 +103,12 @@ async function resolveByok(request, reply) {
   request.providerBaseUrl = null;
 
   try {
-    request.providerBaseUrl = registry.assertBaseUrlAllowed(request.headers['x-provider-base-url'], provider);
+    const validated = registry.assertBaseUrlAllowed(request.headers['x-provider-base-url'], provider);
+    // §3.7 butir 3 / §3.8 butir 5 (v1.2): `X-Provider-Base-Url` hanya relevan untuk
+    // ROUTING pada provider `custom`/lokal. Untuk provider registry, header tetap
+    // DIVALIDASI anti-SSRF (permintaan berbahaya ditolak), tetapi origin yang
+    // diberikan klien DIABAIKAN — backend memakai `baseUrl` registry.
+    request.providerBaseUrl = provider.clientBaseUrl ? validated : null;
   } catch (err) {
     return fail(reply, err, request.id);
   }

@@ -303,14 +303,14 @@ describe('mode PROXY (§3.7, §6.4)', () => {
 
     const out = await client.invoke({
       provider: 'gemini',
-      jobType: 'transcribe',
+      jobType: 'scene_detect',
       payload: { projectId: 'p-1', assetId: 'a-1', params: { lang: 'id' } },
     });
 
     expect(fetchImpl.calls[0].url).toBe('http://localhost:8787/v1/ai/jobs');
     expect(bodyOf(fetchImpl.calls[0])).toEqual({
       projectId: 'p-1',
-      jobType: 'transcribe',
+      jobType: 'scene_detect',
       inputRef: 'a-1',
       params: { lang: 'id' },
     });
@@ -377,7 +377,7 @@ describe('pre-flight (sebelum menyentuh jaringan)', () => {
   it('provider tak dikenal → ERR_PROVIDER_UNSUPPORTED', async () => {
     const fetchImpl = makeFetch(() => geminiOk());
     await expectCode(
-      makeClient(fetchImpl).invoke({ provider: 'anthropic', jobType: 'parse_command', payload: { rawText: 'hai' } }),
+      makeClient(fetchImpl).invoke({ provider: 'cohere', jobType: 'parse_command', payload: { rawText: 'hai' } }),
       'ERR_PROVIDER_UNSUPPORTED'
     );
   });
@@ -412,7 +412,7 @@ describe('pre-flight (sebelum menyentuh jaringan)', () => {
 
 describe('testProvider (§2.12.4)', () => {
   it('gemini sukses → {ok:true, latencyMs, error:null}', async () => {
-    const fetchImpl = makeFetch(() => jsonResponse({ candidates: [{ content: { parts: [{ text: '{}' }] } }] }));
+    const fetchImpl = makeFetch(() => jsonResponse({ candidates: [{ content: { parts: [{ text: '{"ops":[]}' }] } }] }));
     const result = await makeClient(fetchImpl).testProvider({ provider: 'gemini' });
 
     expect(result.ok).toBe(true);
@@ -473,7 +473,7 @@ describe('testProvider (§2.12.4)', () => {
 
   it('provider tak dikenal → ok:false + ERR_PROVIDER_UNSUPPORTED', async () => {
     const fetchImpl = makeFetch(() => jsonResponse({}));
-    const result = await makeClient(fetchImpl).testProvider({ provider: 'anthropic' });
+    const result = await makeClient(fetchImpl).testProvider({ provider: 'cohere' });
     expect(result.ok).toBe(false);
     expect(result.error.code).toBe('ERR_PROVIDER_UNSUPPORTED');
   });

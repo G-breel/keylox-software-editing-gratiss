@@ -10,6 +10,9 @@ const { contextBridge, ipcRenderer } = require('electron');
  *  - §2.11.2 daftar method final (permukaan = allowlist channel, objek di-freeze)
  *  - §2.11.3 tabel migrasi + perilaku alias (1 log deprecation per method)
  *  - §2.12   5 channel BYOK (`settings:setSecret|hasSecret|clearSecret|testProvider`, `ai:invoke`)
+ *  - §2.12.7 `shell:openExternal` (allowlist https + host resmi) [BARU v1.2]
+ *  - §2.15   5 channel privasi/data (`privacy:getMode|setMode|confirmExternal`, `data:wipeLocal|exportLocal`) [BARU v1.2]
+ *  - §2.16   `usage:get` (transparansi token/biaya) [BARU v1.2]
  *  - §2.7    `settings:get|set` (non-rahasia; rahasia lewat setSecret)
  *  - §5.2.1  `ERR_IPC_CHANNEL_DENIED` untuk channel di luar allowlist
  *
@@ -48,6 +51,16 @@ const INVOKE_CHANNELS = Object.freeze({
   'settings:clearSecret': true,
   'settings:testProvider': true,
   'ai:invoke': true,
+  // §2.12.7 — onboarding "Dapatkan API Key Gratis" [BARU v1.2]
+  'shell:openExternal': true,
+  // §2.16 — transparansi token/biaya [BARU v1.2]
+  'usage:get': true,
+  // §2.15 — privasi & data [BARU v1.2]
+  'privacy:getMode': true,
+  'privacy:setMode': true,
+  'privacy:confirmExternal': true,
+  'data:wipeLocal': true,
+  'data:exportLocal': true,
 });
 
 const EVENT_CHANNELS = Object.freeze({
@@ -57,6 +70,18 @@ const EVENT_CHANNELS = Object.freeze({
 function deniedError(channel) {
   const err = new Error(`IPC channel tidak diizinkan: ${channel} (ERR_IPC_CHANNEL_DENIED)`);
   err.code = 'ERR_IPC_CHANNEL_DENIED';
+  err.retryable = false;
+  return err;
+}
+
+/**
+ * Error validasi payload (bukan pelanggaran allowlist channel). Dipakai channel
+ * v1.2 agar kode error yang dilihat renderer sesuai `api-contract.md` §5.2
+ * (`ERR_VALIDATION_PAYLOAD`), bukan `ERR_IPC_CHANNEL_DENIED`.
+ */
+function validationError(message) {
+  const err = new Error(message);
+  err.code = 'ERR_VALIDATION_PAYLOAD';
   err.retryable = false;
   return err;
 }
@@ -76,11 +101,23 @@ function isPathArg(v) {
   return typeof v === 'string' && v.length > 0 && v.length <= 4096 && !v.includes('\0');
 }
 
-const PROVIDERS = Object.freeze(['gemini', 'openai']);
+// 13 provider kanonik (api-contract v1.2 §2.13.1). Daftar ini SENGAJA di-inline:
+// `sandbox: true` membuat preload tidak boleh `require()` berkas `src/shared/**`.
+// Sumber kebenaran tetap registry; kesamaan dijaga oleh tests/unit/preloadChannels.test.ts.
+const PROVIDERS = Object.freeze([
+  'gemini', 'openai', 'anthropic', 'openrouter', 'groq', 'deepseek', 'mistral',
+  'xai', 'together', 'cerebras', 'ollama', 'lmstudio', 'custom',
+]);
+
 const JOB_TYPES = Object.freeze([
   'parse_command', 'chat', 'refine', 'transcribe', 'scene_detect',
   'ocr', 'metadata', 'thumbnail', 'vision_color', 'tts', 'translate', 'moderation',
 ]);
+
+const PRIVACY_MODES = Object.freeze(['local-only', 'standard', 'cloud']);
+const CONFIRM_SCOPES = Object.freeze(['once', 'session', 'always']);
+const WIPE_SCOPES = Object.freeze(['cache', 'usage', 'all']);
+const USAGE_RANGES = Object.freeze(['today', '7d', '30d', 'all']);
 
 function isProvider(v) {
   return typeof v === 'string' && PROVIDERS.includes(v);
@@ -129,6 +166,19 @@ const keylox = {
 
   shell: {
     openPath: (p) => (isPathArg(p) ? invoke('shell:openPath', p) : Promise.resolve()),
+    /**
+     * §2.12.7 [BARU v1.2] — buka dokumentasi/akun provider di browser OS.
+     * Allowlist (https + host resmi) ditegakkan di MAIN; di sini hanya bentuk arg.
+     */
+    openExternal: (input) => {
+      const url = typeof input === 'string' ? input : (isPlainObject(input) ? input.url : undefined);
+      if (typeof url !== 'string' || url.length === 0) {
+        return Promise.reject(validationError('URL eksternal tidak valid.'));
+      }
+      // Skema/host/panjang divalidasi ulang di MAIN (allowlist `docsUrl`); error-nya
+      // `ERR_VALIDATION_PAYLOAD` dengan reason `external_url_not_allowed` (§2.12.7).
+      return invoke('shell:openExternal', { url }).then((r) => unwrap('shell:openExternal', r));
+    },
   },
 
   ffmpeg: {
@@ -220,7 +270,10 @@ const keylox = {
       if (!isProvider(payload.provider)) {
         return Promise.resolve({ ok: false, latencyMs: null, error: { code: 'ERR_PROVIDER_UNSUPPORTED', message: 'Provider tidak dikenal.' } });
       }
-      return invoke('settings:testProvider', { provider: payload.provider }).then((r) =>
+      return invoke('settings:testProvider', {
+        provider: payload.provider,
+        ...(typeof payload.model === 'string' && payload.model ? { model: payload.model } : {}),
+      }).then((r) =>
         isPlainObject(r) ? r : { ok: false, latencyMs: null, error: { code: 'ERR_PROVIDER_UNREACHABLE', message: 'Respons tidak dikenal.' } }
       );
     },
@@ -229,8 +282,8 @@ const keylox = {
   ai: {
     /**
      * SATU-SATUNYA jalur AI. Renderer dilarang `fetch` ke provider.
-     * → `{ result, tokens, cacheHit, latencyMs }`; `result` untuk
-     * `parse_command|chat|refine` sudah lolos `EditPlanOutputSchema` di MAIN.
+     * → `{ result, tokens, cacheHit, latencyMs, provider, model, capability, jobType }`;
+     * `result` untuk `parse_command|chat|refine` sudah lolos `EditPlanOutputSchema` di MAIN.
      */
     invoke: (input) => {
       const payload = isPlainObject(input) ? input : {};
@@ -242,6 +295,55 @@ const keylox = {
         jobType: payload.jobType,
         payload: payload.payload,
       }).then((r) => unwrap('ai:invoke', r));
+    },
+  },
+
+  /** §2.16 [BARU v1.2] — ringkasan token/biaya; tidak pernah memicu jaringan. */
+  usage: {
+    get: (input) => {
+      const payload = isPlainObject(input) ? input : {};
+      if (payload.range !== undefined && !USAGE_RANGES.includes(payload.range)) {
+        return Promise.reject(validationError('Range usage tidak valid.'));
+      }
+      return invoke('usage:get', payload).then((r) => unwrap('usage:get', r));
+    },
+  },
+
+  /** §2.15 [BARU v1.2] — mode privasi & konfirmasi kirim konten ke cloud. */
+  privacy: {
+    getMode: () => invoke('privacy:getMode').then((r) => unwrap('privacy:getMode', r)),
+    setMode: (input) => {
+      const payload = isPlainObject(input) ? input : {};
+      if (!PRIVACY_MODES.includes(payload.mode)) {
+        return Promise.reject(validationError('Mode privasi tidak valid.'));
+      }
+      return invoke('privacy:setMode', { mode: payload.mode }).then((r) => unwrap('privacy:setMode', r));
+    },
+    confirmExternal: (input) => {
+      const payload = isPlainObject(input) ? input : {};
+      if (!isProvider(payload.provider) || !CONFIRM_SCOPES.includes(payload.scope)) {
+        return Promise.reject(validationError('Payload privacy:confirmExternal tidak valid.'));
+      }
+      const safe = { provider: payload.provider, scope: payload.scope };
+      if (typeof payload.purpose === 'string') safe.purpose = payload.purpose.slice(0, 280);
+      return invoke('privacy:confirmExternal', safe).then((r) => unwrap('privacy:confirmExternal', r));
+    },
+  },
+
+  /** §2.15.4–§2.15.5 [BARU v1.2] — data lokal. */
+  data: {
+    wipeLocal: (input) => {
+      const payload = isPlainObject(input) ? input : {};
+      if (!WIPE_SCOPES.includes(payload.scope) || payload.confirm !== true) {
+        return Promise.reject(validationError('Payload data:wipeLocal tidak valid (butuh { scope, confirm: true }).'));
+      }
+      return invoke('data:wipeLocal', { scope: payload.scope, confirm: true }).then((r) => unwrap('data:wipeLocal', r));
+    },
+    exportLocal: (input) => {
+      const payload = isPlainObject(input) ? input : {};
+      const safe = {};
+      if (payload.includeSecrets === true) safe.includeSecrets = true;
+      return invoke('data:exportLocal', safe).then((r) => unwrap('data:exportLocal', r));
     },
   },
 };
@@ -282,6 +384,14 @@ const DEPRECATIONS = Object.freeze({
   clearSecret: 'window.keylox.settings.clearSecret',
   testProvider: 'window.keylox.settings.testProvider',
   aiInvoke: 'window.keylox.ai.invoke',
+  // [v1.2]
+  openExternal: 'window.keylox.shell.openExternal',
+  usageGet: 'window.keylox.usage.get',
+  privacyGetMode: 'window.keylox.privacy.getMode',
+  privacySetMode: 'window.keylox.privacy.setMode',
+  privacyConfirmExternal: 'window.keylox.privacy.confirmExternal',
+  wipeLocal: 'window.keylox.data.wipeLocal',
+  exportLocal: 'window.keylox.data.exportLocal',
 });
 
 const warned = new Set();
@@ -320,6 +430,14 @@ const legacyApi = {
   clearSecret: deprecated('clearSecret', keylox.settings.clearSecret),
   testProvider: deprecated('testProvider', keylox.settings.testProvider),
   aiInvoke: deprecated('aiInvoke', keylox.ai.invoke),
+  // [v1.2] aksesori baru lewat alias.
+  openExternal: deprecated('openExternal', keylox.shell.openExternal),
+  usageGet: deprecated('usageGet', keylox.usage.get),
+  privacyGetMode: deprecated('privacyGetMode', keylox.privacy.getMode),
+  privacySetMode: deprecated('privacySetMode', keylox.privacy.setMode),
+  privacyConfirmExternal: deprecated('privacyConfirmExternal', keylox.privacy.confirmExternal),
+  wipeLocal: deprecated('wipeLocal', keylox.data.wipeLocal),
+  exportLocal: deprecated('exportLocal', keylox.data.exportLocal),
 };
 
 contextBridge.exposeInMainWorld('api', Object.freeze(legacyApi));

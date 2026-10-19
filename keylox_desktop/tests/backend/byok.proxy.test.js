@@ -8,9 +8,10 @@
 //  - X-Provider-Key: TLS-only, format divalidasi, TIDAK pernah masuk log/respons;
 //  - fallback GEMINI_API_KEY hanya dev/testing; production/BYOK_REQUIRE_USER_KEY → 401;
 //  - cache: kunci = hash(jobType+input+modelVersion+hash(key)[8]) → key berbeda = miss;
+//    HANYA jobType struktural (`scene_detect`, `thumbnail`, …) yang di-cache (§3.5 v1.2);
 //  - rate limit tambahan per hash(key);
 //  - anti-SSRF pada X-Provider-Base-Url;
-//  - X-Provider openai (belum didukung) → ERR_PROVIDER_UNSUPPORTED;
+//  - X-Provider = enum registry 13 provider; di luar itu → ERR_PROVIDER_UNSUPPORTED;
 //  - output AI yang melanggar schema/invarian → 502 ERR_AI_INVALID_RESPONSE.
 
 const { test, before, after } = require('node:test');
@@ -25,6 +26,7 @@ const DEVICE_A = '33333333-3333-4333-8333-333333333333';
 const KEY_A = ['AIza', 'k'.repeat(35)].join('');
 const KEY_B = ['AIza', 'q'.repeat(35)].join('');
 const KEY_RATE = ['AIza', 'z'.repeat(35)].join('');
+const KEY_C = ['AIza', 'c'.repeat(35)].join('');
 
 let devServer;        // dev/test: fallback env diizinkan, MOCK_AI
 let byokServer;       // BYOK_REQUIRE_USER_KEY=true + rate limit per key = 3
@@ -135,22 +137,39 @@ test('key sah → 200 + EditPlan tervalidasi, key tidak pernah muncul di respons
   assert.equal(text.includes(KEY_A), false);
 });
 
-test('cache: input sama + key sama → hit; key berbeda → MISS (hash(key)[8] ada di kunci cache)', async () => {
-  const body = parseBody('cache-key-scope-' + Date.now());
+test('cache (jobType struktural): input sama + key sama → hit; key berbeda → MISS (hash(key)[8] ada di kunci cache)', async () => {
+  // §3.5 (v1.2): `parse_command` (berkonten) TIDAK PERNAH di-cache. Cache diuji lewat
+  // `scene_detect` yang termasuk `CACHEABLE_JOB_TYPES`.
+  const body = { prompt: 'cache-key-scope-' + Date.now() };
 
-  const first = await request(byokServer, 'POST', '/ai/parse-command', {
+  const first = await request(byokServer, 'POST', '/ai/scene-detect', {
     headers: { 'x-device-id': DEVICE_A, 'x-provider-key': KEY_A }, body,
   });
-  const second = await request(byokServer, 'POST', '/ai/parse-command', {
+  const second = await request(byokServer, 'POST', '/ai/scene-detect', {
     headers: { 'x-device-id': DEVICE_A, 'x-provider-key': KEY_A }, body,
   });
-  const otherKey = await request(byokServer, 'POST', '/ai/parse-command', {
+  const otherKey = await request(byokServer, 'POST', '/ai/scene-detect', {
     headers: { 'x-device-id': DEVICE_A, 'x-provider-key': KEY_B }, body,
   });
 
+  assert.equal(first.status, 200, first.text);
   assert.equal(first.json.data.cacheHit, false);
   assert.equal(second.json.data.cacheHit, true);
   assert.equal(otherKey.json.data.cacheHit, false, 'key berbeda tidak boleh berbagi entri cache');
+});
+
+test('cache: jobType berkonten (parse_command) TIDAK menghasilkan baris cache (§3.5 v1.2)', async () => {
+  const body = parseBody('no-cache-content-' + Date.now());
+  // Key khusus agar tidak menabrak rate limit per-key (3) di server BYOK.
+  const headers = { 'x-device-id': DEVICE_A, 'x-provider-key': KEY_C };
+
+  const first = await request(byokServer, 'POST', '/ai/parse-command', { headers, body });
+  const second = await request(byokServer, 'POST', '/ai/parse-command', { headers, body });
+
+  assert.equal(first.status, 200, first.text);
+  assert.equal(second.status, 200, second.text);
+  assert.equal(first.json.data.cacheHit, false);
+  assert.equal(second.json.data.cacheHit, false, 'parse_command wajib selalu memanggil ulang (bukan cache)');
 });
 
 test('rate limit tambahan per hash(key): ke-4 permintaan dengan key sama → 429 + Retry-After', async () => {
@@ -172,16 +191,25 @@ test('rate limit tambahan per hash(key): ke-4 permintaan dengan key sama → 429
 
 // ---------------------------------------------------------------- provider
 
-test('X-Provider: openai (belum didukung) → 400 ERR_PROVIDER_UNSUPPORTED', async () => {
+test('X-Provider: provider tak dikenal → 400 ERR_PROVIDER_UNSUPPORTED', async () => {
   for (const server of [byokServer, devServer]) {
     const { status, json } = await request(server, 'POST', '/ai/parse-command', {
-      headers: { 'x-device-id': DEVICE_A, 'x-provider': 'openai' },
+      headers: { 'x-device-id': DEVICE_A, 'x-provider': 'cohere' },
       body: parseBody('test provider'),
     });
     assert.equal(status, 400);
     assert.equal(json.error.code, 'ERR_PROVIDER_UNSUPPORTED');
     assert.equal(json.error.retryable, false);
   }
+});
+
+test('X-Provider: groq (registry §2.13) didukung — tidak lagi ERR_PROVIDER_UNSUPPORTED', async () => {
+  const { status, json } = await request(devServer, 'POST', '/ai/parse-command', {
+    headers: { 'x-device-id': DEVICE_A, 'x-provider': 'groq' },
+    body: parseBody('groq provider ' + Date.now()),
+  });
+  assert.equal(status, 200);
+  assert.equal(json.ok, true);
 });
 
 test('X-Provider tak dikenal → 400 ERR_PROVIDER_UNSUPPORTED (label disanitasi)', async () => {
@@ -210,7 +238,7 @@ test('anti-SSRF: baseUrl host arbitrer / metadata / privat ditolak 400', async (
       body: parseBody('test ssrf'),
     });
     assert.equal(status, 400, `harus 400 untuk ${baseUrl}`);
-    assert.equal(json.error.code, 'ERR_VALIDATION_PAYLOAD');
+    assert.equal(json.error.code, 'ERR_PROVIDER_BASE_URL_NOT_ALLOWED');
     assert.equal(json.error.details.reason, reason, `reason salah untuk ${baseUrl}`);
     assert.equal(text.includes(baseUrl), false, 'respons tidak boleh memantulkan URL mentah');
   }
@@ -283,7 +311,7 @@ test('output AI destruktif tanpa requiresConfirm → 502 ERR_AI_INVALID_RESPONSE
 test('log backend tidak pernah memuat key (hanya fingerprint 8 char)', async () => {
   const logs = byokServer.logs();
   assert.ok(logs.length > 0, 'log harus tertangkap (LOG_LEVEL=debug)');
-  for (const key of [KEY_A, KEY_B, KEY_RATE]) {
+  for (const key of [KEY_A, KEY_B, KEY_RATE, KEY_C]) {
     assert.equal(logs.includes(key), false, 'key utuh bocor ke log');
   }
   assert.equal(logs.includes('k'.repeat(20)), false, 'potongan key bocor ke log');
