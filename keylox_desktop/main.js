@@ -31,6 +31,7 @@ const { createExternalLinks } = require('./src/main/externalLinks');
 const { buildExportPayload, writeExportFile } = require('./src/main/localDataExport');
 const projectFile = require('./src/main/projectFile');
 const { USAGE_RANGES } = require('./src/shared/usage.schema');
+const { buildAtempoFilters } = require('./src/main/exportPipeline');
 const { DataWipeLocalSchema, DataExportLocalSchema } = require('./src/shared/privacy.schema');
 
 installConsoleRedaction(console);
@@ -464,7 +465,10 @@ handle('ffmpeg:export', async (event, opts) => {
     if (vf) filters.push(vf);
     if (speed && speed !== 1) filters.push(`setpts=PTS/${speed}`);
     if (filters.length) cmd = cmd.videoFilters(filters.join(','));
-    if (af) cmd = cmd.audioFilters(af);
+    // shortcut: atempo hanya dirantai sederhana; pitch tidak dipertahankan. saat upgrade: pakai aresample+asetrate.
+    const atempo = (speed && speed !== 1) ? buildAtempoFilters(speed).join(',') : '';
+    const afFull = [atempo, af].filter(Boolean).join(',');
+    if (afFull) cmd = cmd.audioFilters(afFull);
     if (removeAudio) cmd = cmd.noAudio();
     else cmd = cmd.audioCodec('aac').audioBitrate('128k');
     if (resolution && resolution !== 'original') cmd = cmd.size(`?x${resolution}`);
