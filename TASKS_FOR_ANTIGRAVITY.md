@@ -9,6 +9,29 @@ Verifikasi wajib sebelum selesai: `cd keylox_desktop && npx tsc --noEmit && npm 
 
 ---
 
+## 🎯 BOSS PROTOCOL — Baca dulu sebelum mulai
+
+**Hubungan:** OpenCode = arsitek/boss (review & merge). Antigravity = worker (implementasi).
+**Komunikasi** lewat file ini saja: baca task → kerjakan → selesai. OpenCode review via `git diff`
+lalu catat hasil di **REVIEW LOG** paling bawah.
+
+**Satu task per sesi.** Kerjakan urut: Task 2 → 3 → 4 → 5 → 6.
+**Antigravity DILARANG:** `git commit`, `git push`, `git add` (OpenCode yang merge).
+**Antigravity DILARANG:** sentuh file di luar kolom "BOLEH ubah" tiap task.
+
+**Kriteria penerimaan (OpenCode yang cek):**
+1. `npx tsc --noEmit` → 0 error.
+2. `npm run test:unit` → 328+ lulus, 0 gagal.
+3. `npm run test:backend` → 103 lulus (jangan pecahkan).
+4. `npm run secret-scan` → 0 temuan.
+5. `git diff --stat` → hanya file yang diizinkan task bersangkutan.
+6. Tidak ada `console.log`/debugger baru di kode produksi.
+
+**Bila review GAGAL:** OpenCode tulis catatan di REVIEW LOG → user re-dispatch Antigravity
+dengan catatan tsb. Jangan mulai task baru sampai task sebelumnya ACCEPTED.
+
+---
+
 ## Task 1 — Export Pipeline v1 (U6) ✅ DONE
 `src/shared/exportPresets.js`, `src/main/exportPipeline.js`, `tests/unit/exportPipeline.test.ts` sudah ada & 22 tes lulus.
 
@@ -139,3 +162,21 @@ Fungsi mapping harus di-ekstrak ke `src/renderer/lib/exportMapping.ts` agar bisa
 
 ## Cara dispatch
 Kirim satu task saja per sesi Antigravity (mis. "kerjakan Task 2 di TASKS_FOR_ANTIGRAVITY.md"). Setelah selesai, OpenCode review `git diff`, jalankan `tsc`+`test:unit`, lalu commit & push.
+
+---
+
+## 📋 REVIEW LOG — diisi OpenCode setelah review
+
+| Task | Tanggal | Status | Catatan |
+|------|---------|--------|---------|
+| 1 Export Pipeline | 2026-10-19 | ✅ ACCEPTED | 22 tes, merge commit `ecb269a`. |
+| 2 Multi-clip export | — | ⬜ belum dispatch | — |
+| 3 Transisi | — | ⬜ belum dispatch | — |
+| 4 AI mock wiring | — | ⬜ belum dispatch | — |
+| 5 Tracking M14 | — | ⬜ belum dispatch | — |
+| 6 Dokumentasi | — | ⬜ belum dispatch | — |
+
+**Status legend:** ⬜ belum dispatch · 🟡 dispatch (Antigravity kerja) · 🔴 review gagal (lihat catatan) · ✅ accepted & merged.
+
+### Catatan review (jika ada yang gagal)
+_(kosong — diisi bila review temukan masalah)_
