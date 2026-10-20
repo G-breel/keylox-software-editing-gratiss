@@ -35,10 +35,10 @@ function estimateCostUsd(providerId, inputTokens, outputTokens) {
   return Math.round(cost * 1e6) / 1e6;
 }
 
-function rangeStartMs(range) {
-  const now = Date.now();
+function rangeStartMs(range, nowFn = () => Date.now()) {
+  const now = nowFn();
   if (range === 'today') {
-    const d = new Date();
+    const d = new Date(now);
     return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
   }
   if (range === '7d') return now - 7 * 24 * 60 * 60 * 1000;
@@ -87,7 +87,7 @@ function createUsageService(deps = {}) {
    */
   function summary(options = {}) {
     const range = USAGE_RANGES.includes(options.range) ? options.range : DEFAULT_USAGE_RANGE;
-    const start = rangeStartMs(range);
+    const start = rangeStartMs(range, now);
     const filtered = records.filter((r) => {
       if (Date.parse(r.recordedAt) < start) return false;
       if (options.provider && r.provider !== options.provider) return false;
