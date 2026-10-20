@@ -93,4 +93,4 @@ Aplikasi dianggap **bisa dipakai normal** bila 8 hal ini bekerja tanpa AI:
 | M2 | **Editor usable (DoU U1–U8)** | ⬜ berikutnya |
 | M3 | Fitur manual + asset pack | ⬜ |
 | M4 | Fitur AI (mock) + tracking | ⬜ |
-| M5 | **Uji AI live + rilis** | ✅ build `.exe` final (setup 103.9 MB + portable 103.7 MB), secret-scan bersih. Smoke test AI live tertunda (key invalid). |
+| M5 | **Uji AI live + rilis** | ✅ build `.exe` final (setup 103.9 MB + portable 103.7 MB), secret-scan bersih. Smoke test live: provider reachable + auth OK; schema gate (§3.3) menolak output invalid — integrasi fungsional, kualitas model perlu tuning. |
