@@ -443,6 +443,15 @@ handle('ffmpeg:export', async (event, opts) => {
   if (!output) return { success: false, error: 'Output path tidak valid.' };
   if (vf === null || af === null) return { success: false, error: 'Filter video/audio ditolak oleh validasi keamanan.' };
 
+  // Resolve LUT relatif (pack starter) ke path absolut dan injeksi ke vf.
+  let lutPrefix = '';
+  if (typeof payload.lut === 'string' && payload.lut.trim()) {
+    const lutBase = path.resolve(__dirname, 'assets', 'packs', 'starter');
+    const lutAbs = path.resolve(lutBase, payload.lut.trim().replace(/^starter[\\/]/, ''));
+    if (lutAbs.startsWith(lutBase + path.sep) && fs.existsSync(lutAbs)) {
+      lutPrefix = `lut3d='${lutAbs.replace(/\\\\/g, '/')}'`;
+    }
+  }
   const speed = safeNumber(payload.speed, { min: 0.1, max: 100, fallback: 1 });
   const bitrate = safeNumber(payload.bitrate, { min: 100, max: 200000, fallback: 2000 });
   const trimStart = safeNumber(payload.trimStart, { min: 0, max: 86400, fallback: 0 });
@@ -463,6 +472,7 @@ handle('ffmpeg:export', async (event, opts) => {
     if (trimStart > 0) cmd = cmd.seekInput(trimStart);
     if (trimEnd > 0) cmd = cmd.duration(Math.max(0, trimEnd - trimStart));
     const filters = [];
+    if (lutPrefix) filters.push(lutPrefix);
     if (vf) filters.push(vf);
     if (speed && speed !== 1) filters.push(`setpts=PTS/${speed}`);
     if (filters.length) cmd = cmd.videoFilters(filters.join(','));
@@ -505,6 +515,23 @@ handle('ffmpeg:exportTimeline', async (event, payload) => {
   }
 
   // Resolve preset (id → preset penuh), lalu override field parsial.
+  // Resolve LUT relatif per-klip (pack starter) -> inject ke extraVf.
+  const lutBase = path.resolve(__dirname, 'assets', 'packs', 'starter');
+  for (let i = 0; i < clips.length; i++) {
+    const c = clips[i];
+    if (c && typeof c.lut === 'string' && c.lut.trim()) {
+      const lutAbs = path.resolve(lutBase, c.lut.trim().replace(/^starter[\\/]/, ''));
+      if (lutAbs.startsWith(lutBase + path.sep) && fs.existsSync(lutAbs)) {
+        const lutFilter = `lut3d='${lutAbs.replace(/\\\\/g, '/')}'`;
+        if (typeof c.extraVf === 'string' && c.extraVf.trim() && c.extraVf.trim() !== 'null') {
+          c.extraVf = `${lutFilter},${c.extraVf}`;
+        } else {
+          c.extraVf = lutFilter;
+        }
+      }
+    }
+  }
+
   let resolvedPreset = {};
   if (p.preset && typeof p.preset === 'object') {
     const base = (typeof p.preset.id === 'string' && p.preset.id)
@@ -542,6 +569,7 @@ handle('ffmpeg:exportTimeline', async (event, payload) => {
         const sec = Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]);
         const pct = Math.min(100, (sec * 1000 / plan.durationMs) * 100);
         event.sender.send('ffmpeg:progress', pct);
+      }
       // frameMatch disimpan untuk kompatibilitas parsing baris `frame=` (tidak ada estimasi % tanpa total frame).
     });
     proc.on('close', (code) => {

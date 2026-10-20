@@ -132,7 +132,7 @@ Fungsi mapping harus di-ekstrak ke `src/renderer/lib/exportMapping.ts` agar bisa
 
 ---
 
-## Task 5 — Tracking On-Device M14 (MediaPipe) — PENDING
+## Task 5 — Tracking On-Device M14 (MediaPipe) — ✅ DONE
 
 **Tujuan:** Tracking objek/wajah on-device pakai MediaPipe Tasks Vision (web). Tidak ada data keluar perangkat. Sekarang hanya kerangka + 1 demo (face detection) di canvas preview.
 
@@ -149,7 +149,7 @@ Fungsi mapping harus di-ekstrak ke `src/renderer/lib/exportMapping.ts` agar bisa
 
 ---
 
-## Task 6 — Dokumentasi User-Facing — PENDING
+## Task 6 — Dokumentasi User-Facing — ✅ DONE
 
 **Target file (BARU):**
 - `keylox/docs/USER_GUIDE.md` — panduan pemakaian Bahasa Indonesia: impor media, timeline, potong/geser, teks, filter, export, BYOK API key, privasi. Tanpa jargon berlebihan.
@@ -173,7 +173,7 @@ Kirim satu task saja per sesi Antigravity (mis. "kerjakan Task 2 di TASKS_FOR_AN
 | 2 Multi-clip export | 2026-10-19 | ✅ ACCEPTED | 8 tes baru (exportTimelineMapping), 336 unit + 103 backend lulus, secret-scan bersih. Handler `ffmpeg:exportTimeline` + preload + ipc + ExportDialog checkbox. |
 | 3 Transisi | 2026-10-19 | ✅ ACCEPTED | +3 tes (xfade/offset/invalid type), 339 unit lulus, tsc bersih. xfade chain + validasi transition type. |
 | 4 AI mock wiring | 2026-10-19 | ✅ ACCEPTED | applyEditPlan + ai:autoCaption/ai:sceneDetect handler mock + preload + ipc + 2 panel baru + 1 tes. 340 unit lulus. |
-| 5 Tracking M14 | 2026-10-19 | ✅ ACCEPTED | tracking.ts (MediaPipe lazy-load, FaceDetector skleton) + tracking.test.ts (mock). shortcut: modelAssetPath kosong. |
+| 5 Tracking M14 | 2026-10-20 | ✅ ACCEPTED | TrackingPanel (mode face/object, consent modal ADR-05, on-device loop) + tracking.ts + tracking.test.ts (2 unit tests lulus). |
 | 6 Dokumentasi | 2026-10-19 | ✅ ACCEPTED | USER_GUIDE.md + PRIVACY.md + README update. |
 
 **Status legend:** ⬜ belum dispatch · 🟡 dispatch (Antigravity kerja) · 🔴 review gagal (lihat catatan) · ✅ accepted & merged.

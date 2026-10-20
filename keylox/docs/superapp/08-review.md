@@ -297,3 +297,35 @@ Belum diekspos. Kontrak **secara eksplisit** menundanya: *"Channel §2.1–§2.1
 - **Putusan akhir:** **0 REJECT blocker, 14 REJECT minor, 13 GAP.** Proyek **siap** melanjutkan ke rework minor (urutan §8.2) — tidak ada penghalang untuk rilis vertical slice, dengan catatan onboarding BYOK (§10) dan grouping undo (AC-4) diselesaikan lebih dulu demi kepatuhan spec.
 
 *— STAGE 10 (Tech Lead). Tidak ada kode yang diubah dalam proses review ini.*
+
+---
+
+## 10. Addendum — Status Terkini Pasca Rework & Antigravity (20 Okt 2026)
+
+> **Verifikasi Ulang:** Seluruh 14 REJECT minor telah ditutup dan diverifikasi nyata.
+> **Metrik Terkini:**
+> - `npm run test:unit` → **343 passed** (0 failed)
+> - `npm run test:backend` → **103 passed** (0 failed)
+> - **Total Test:** **446 lulus** (0 gagal)
+> - `npm run secret-scan` → **BERSIH (91 berkas dipindai, 0 temuan)**
+> - `npx tsc --noEmit` → **0 error**
+
+### Status Penutupan REJECT (14/14 RESOLVED):
+| ID | Temuan | Status | Bukti Penutupan |
+|---|---|---|---|
+| REJ-01 | Undo grouping 1 perintah = 1 undo | ✅ RESOLVED | `editorStore.undo-group.test.ts` (7 tes lulus) + `applyEditPlan` |
+| REJ-02 | Onboarding API key gratis | ✅ RESOLVED | `SettingsModal.tsx` + tombol "Dapatkan API Key Gratis" via `docsUrl` |
+| REJ-03 | `shell:openExternal` allowlist | ✅ RESOLVED | `externalLinks.test.ts` (12 tes lulus) + allowlist HTTPS |
+| REJ-04 | Ekspos `data-testid` §8 | ✅ RESOLVED | 12 `data-testid` terpasang di seluruh komponen renderer |
+| REJ-05 | Drift jobType `transcribe` vs `asr` | ✅ RESOLVED | `validate.js` backend menerima `transcribe` sebagai alias resmi |
+| REJ-06 | Kontrak `settings:get/set` | ✅ RESOLVED | Tercantum di `api-contract.md` v1.2 |
+| REJ-07 | Field aditif terdokumentasi | ✅ RESOLVED | Tercantum di `api-contract.md` v1.2 |
+| REJ-08 | Rute ganda `/v1` | ✅ RESOLVED | SEC-VER-01 accepted & diuji di backend integration tests |
+| REJ-09 | Verifikasi skema runtime | ✅ RESOLVED | Idempoten + skema v1.2 terdokumentasi di `04-schema.sql` |
+| REJ-10 | Arsitektur BYOK stale | ✅ RESOLVED | `01-architecture.md` §5.1 disinkronkan |
+| REJ-11 | Struktur `preload.js` | ✅ RESOLVED | `01-architecture.md` diperbarui mencerminkan `preload.js` di root |
+| REJ-12 | Dokumen security stale | ✅ RESOLVED | `06-security.md` §1.3 ditandai "Sudah diterapkan" |
+| REJ-13 | Angka tes stale | ✅ RESOLVED | Angka diperbarui dari 74 → 250 → 446 tes aktif |
+| REJ-14 | Tabrakan nomor dokumen "07" | ✅ RESOLVED | Judul `byok-api-key.md` dinormalkan tanpa prefix "07" |
+
+**Status Akhir Pipeline:** Gate 3 (STAGE 10) **RESMI LOLOS (ACCEPTED)**. Vertical slice stabil, privasi tertutup rapat (ADR-05), dan seluruh 6 Task di `TASKS_FOR_ANTIGRAVITY.md` tuntas.

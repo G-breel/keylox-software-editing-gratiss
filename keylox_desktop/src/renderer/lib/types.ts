@@ -62,6 +62,8 @@ export interface Clip {
   removeAudio: boolean;
   chroma: boolean;
   chromaSim: number;
+  /** LUT relatif ke pack starter (mis. 'luts/warm.cube') atau null. */
+  lut?: string | null;
   /** Transisi ke klip berikutnya (opsional). */
   transition?: { type: 'crossfade' | 'fadeblack' | 'slide'; durationMs: number } | null;
 }

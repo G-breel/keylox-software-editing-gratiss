@@ -1,8 +1,11 @@
 import React, { useState } from 'react';
 import { useEditorStore } from '../stores/editorStore';
 import { defaultFilters, defaultTransform } from '../lib/types';
+import { AutoCaptionPanel } from './AutoCaptionPanel';
+import { SceneDetectPanel } from './SceneDetectPanel';
+import manifest from '../../../assets/packs/starter/manifest.json';
 
-const TABS = ['Basic', 'Transform', 'Filter', 'Text', 'Audio', 'Transisi'] as const;
+const TABS = ['Basic', 'Transform', 'Filter', 'Text', 'Audio', 'Transisi', 'AI (Mock)'] as const;
 type Tab = typeof TABS[number];
 
 export const Inspector: React.FC<{ onExport: () => void }> = ({ onExport }) => {
@@ -120,6 +123,15 @@ export const Inspector: React.FC<{ onExport: () => void }> = ({ onExport }) => {
               <input type="checkbox" checked={clip.chroma} onChange={(e) => update({ chroma: e.target.checked })} />
               Chroma Key
             </label>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-textMuted w-20">LUT</label>
+              <select value={clip.lut || ''} onChange={(e) => update({ lut: e.target.value || null })} className="flex-1">
+                <option value="">Tanpa LUT</option>
+                {manifest.items.map((i: any) => (
+                  <option key={i.id} value={i.file}>{i.name}</option>
+                ))}
+              </select>
+            </div>
           </div>
         )}
         {tab === 'Text' && (
@@ -212,6 +224,18 @@ export const Inspector: React.FC<{ onExport: () => void }> = ({ onExport }) => {
               <input type="checkbox" checked={clip.removeAudio} onChange={(e) => update({ removeAudio: e.target.checked })} />
               Remove audio on export
             </label>
+          </div>
+        )}
+        {tab === 'AI (Mock)' && (
+          <div className="flex flex-col gap-3">
+            <div className="border border-border rounded p-2 bg-elevated/40">
+              <h4 className="text-xs font-semibold mb-1 text-textPrimary">Auto-Caption (Mock)</h4>
+              <AutoCaptionPanel />
+            </div>
+            <div className="border border-border rounded p-2 bg-elevated/40">
+              <h4 className="text-xs font-semibold mb-1 text-textPrimary">Scene Detect (Mock)</h4>
+              <SceneDetectPanel />
+            </div>
           </div>
         )}
       </div>

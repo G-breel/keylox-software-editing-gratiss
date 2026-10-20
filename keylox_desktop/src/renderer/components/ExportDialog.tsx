@@ -70,6 +70,8 @@ export const ExportDialog: React.FC<{ open: boolean; onClose: () => void }> = ({
     if (wholeTimeline) {
       const timelineClips = (store.tracks?.[0]?.clips || []).slice().sort((a, b) => a.start - b.start);
       const mapped = mapClipsToPipeline(timelineClips);
+      const lutByClip = new Map(timelineClips.map((c) => [`${c.path}|${Math.round((c.start ?? 0) * 1000)}`, c.lut || null]));
+      mapped.forEach((m) => { (m as { lut?: string | null }).lut = lutByClip.get(`${m.path}|${m.startMs}`) ?? null; });
       if (mapped.length === 0) {
         setRunning(false);
         setStatus('Tidak ada klip di timeline.');
@@ -105,6 +107,7 @@ export const ExportDialog: React.FC<{ open: boolean; onClose: () => void }> = ({
       trimEnd: clip.end,
       speed: clip.speed,
       removeAudio: clip.removeAudio,
+      lut: clip.lut || null,
       resolution: resolutionSel,
       fps: fps,
       bitrate: bitrate,
