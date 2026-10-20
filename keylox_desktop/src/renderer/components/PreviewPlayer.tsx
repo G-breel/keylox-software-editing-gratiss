@@ -43,6 +43,10 @@ export const PreviewPlayer: React.FC = () => {
   const expectedTime = clip ? clipSourceTime(clip, playheadSec) : 0;
   const duration = totalDurationSec(store.tracks);
 
+  const transDur = clip?.transition?.durationMs ? clip.transition.durationMs / 1000 : 0;
+  const inTransition = !!clip?.transition && transDur > 0
+    && playheadSec >= (clip.end - transDur) && playheadSec <= clip.end;
+
   const cssFilter = cssFilterFor(clip);
   const transform = transformFor(clip);
 
@@ -182,6 +186,11 @@ export const PreviewPlayer: React.FC = () => {
             {o.text}
           </div>
         ))}
+        {inTransition && (
+          <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-active/80 text-white text-[10px] pointer-events-none">
+            transisi: {clip?.transition?.type}
+          </div>
+        )}
       </div>
       {!src && (
         <div className="absolute text-textMuted text-sm text-center px-6">
