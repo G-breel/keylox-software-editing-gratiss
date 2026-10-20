@@ -843,30 +843,6 @@ secretHandle('settings:set', async (_event, input) => {
 });
 
 /* ------------------------------------------------------------------ *
- * IPC: AI mock (Task 4 — auto-caption & scene-detect). Mock only, tanpa jaringan.
- * ------------------------------------------------------------------ */
-
-handle('ai:autoCaption', async (_event, input) => {
-  const payload = input && typeof input === 'object' ? input : {};
-  const durationSec = typeof payload.durationSec === 'number' && payload.durationSec > 0 ? payload.durationSec : 30;
-  const captions = [];
-  for (let t = 0; t < durationSec; t += 3) {
-    captions.push({ start: t, end: Math.min(t + 3, durationSec), text: `[caption mock #${captions.length + 1}]` });
-  }
-  return { captions };
-});
-
-handle('ai:sceneDetect', async (_event, input) => {
-  const payload = input && typeof input === 'object' ? input : {};
-  const durationSec = typeof payload.durationSec === 'number' && payload.durationSec > 0 ? payload.durationSec : 30;
-  const scenes = [];
-  for (let t = 0; t < durationSec; t += 5) {
-    scenes.push({ start: t, end: Math.min(t + 5, durationSec) });
-  }
-  return { scenes };
-});
-
-/* ------------------------------------------------------------------ *
  * IPC: proyek `.keylox` (M2-A / U8)
  *
  * Nama channel mengikuti kontrak §2.1 (`project:save`, `project:open`) dan
